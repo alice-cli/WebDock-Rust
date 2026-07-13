@@ -16,7 +16,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-14, windows-latest, ubuntu-22.04]
+        # ubuntu-24.04: pipewire/spa headers match libspa 0.9 (xcap); 22.04 is too old
+        os: [macos-14, windows-latest, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -44,7 +45,12 @@ jobs:
             libpipewire-0.3-dev \
             libspa-0.2-dev \
             libclang-dev \
-            clang
+            clang \
+            libxcb1-dev \
+            libxrandr-dev \
+            libdbus-1-dev \
+            libwayland-dev \
+            libegl-dev
 
       - name: Format check
         run: cargo fmt --all -- --check

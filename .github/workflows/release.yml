@@ -36,7 +36,8 @@ jobs:
 
   build-linux:
     needs: version
-    runs-on: ubuntu-22.04
+    # 24.04: system spa headers match libspa 0.9 used by xcap 0.9 / pipewire 0.9
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -48,7 +49,8 @@ jobs:
             pkg-config libssl-dev \
             libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
             libpipewire-0.3-dev libspa-0.2-dev \
-            libclang-dev clang
+            libclang-dev clang \
+            libxcb1-dev libxrandr-dev libdbus-1-dev libwayland-dev libegl-dev
       - name: Build
         run: cargo build -p webdock-server --release
       - name: Package
