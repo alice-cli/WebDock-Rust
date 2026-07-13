@@ -30,7 +30,7 @@ jobs:
         with:
           shared-key: webrust-ci
 
-      - name: Linux GUI deps (tray / optional)
+      - name: Linux GUI + PipeWire deps (xcap)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
@@ -40,7 +40,11 @@ jobs:
             librsvg2-dev \
             patchelf \
             pkg-config \
-            libssl-dev
+            libssl-dev \
+            libpipewire-0.3-dev \
+            libspa-0.2-dev \
+            libclang-dev \
+            clang
 
       - name: Format check
         run: cargo fmt --all -- --check

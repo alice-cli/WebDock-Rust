@@ -308,7 +308,9 @@ fn close_frontmost() -> Result<(), WindowError> {
 
 #[cfg(target_os = "windows")]
 fn raise_windows(pid: i32) -> Result<(), WindowError> {
-    use windows::Win32::Foundation::{BOOL, HWND, LPARAM, TRUE};
+    // windows crate 0.61: BOOL lives in windows_core; HWND is a thin wrapper.
+    use windows::core::BOOL;
+    use windows::Win32::Foundation::{HWND, LPARAM};
     use windows::Win32::UI::WindowsAndMessaging::{
         EnumWindows, GetWindowThreadProcessId, IsWindowVisible, SetForegroundWindow, ShowWindow,
         SW_RESTORE,
@@ -329,9 +331,9 @@ fn raise_windows(pid: i32) -> Result<(), WindowError> {
         let _ = GetWindowThreadProcessId(hwnd, Some(&mut win_pid));
         if win_pid == ctx.pid && IsWindowVisible(hwnd).as_bool() {
             ctx.hwnd = hwnd;
-            return BOOL(0);
+            return BOOL(0); // FALSE — stop enum
         }
-        TRUE
+        BOOL(1) // TRUE — continue
     }
 
     unsafe {
@@ -347,15 +349,14 @@ fn raise_windows(pid: i32) -> Result<(), WindowError> {
 
 #[cfg(target_os = "windows")]
 fn close_windows_foreground() -> Result<(), WindowError> {
-    use windows::Win32::Foundation::WPARAM;
+    use windows::Win32::Foundation::{LPARAM, WPARAM};
     use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, PostMessageW, WM_CLOSE};
     unsafe {
         let hwnd = GetForegroundWindow();
         if hwnd.0.is_null() {
             return Err(WindowError::NotFound);
         }
-        use windows::Win32::Foundation::LPARAM;
-        // windows 0.61: HWND is optional, LPARAM is required (not Option).
+        // windows 0.61: HWND arg is Option<HWND>
         let _ = PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0));
     }
     Ok(())
