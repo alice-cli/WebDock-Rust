@@ -73,7 +73,24 @@ mod tests {
             px[2] = 30;
             px[3] = 255;
         }
-        let out = s.encode_rgba(&rgba, 64, 64, 0).expect("encode");
+        // VideoToolbox (and some SW paths) may return Empty on the first
+        // frame(s) while the encoder warms up — especially on CI VMs without
+        // a real display scaler (AppleM2ScalerCSCDriver missing).
+        let mut out = None;
+        for i in 0..12 {
+            // Nudge pixels so each frame is not a pure duplicate.
+            rgba[0] = rgba[0].wrapping_add(i as u8);
+            match s.encode_rgba(&rgba, 64, 64, i as i64) {
+                Ok(f) if !f.avcc_au.is_empty() => {
+                    out = Some(f);
+                    break;
+                }
+                Ok(_) => continue,
+                Err(crate::h264::H264Error::Empty) => continue,
+                Err(e) => panic!("encode: {e}"),
+            }
+        }
+        let out = out.expect("encoder produced no AU after several frames");
         assert!(!out.avcc_au.is_empty());
         assert!(out.keyframe || out.avcc_config.is_some() || !out.avcc_au.is_empty());
     }

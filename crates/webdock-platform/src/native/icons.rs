@@ -346,10 +346,16 @@ fn windows_file_icon(path: &str) -> Option<String> {
     use windows::core::PCWSTR;
     use windows::Win32::Graphics::Gdi::{
         CreateCompatibleDC, DeleteDC, DeleteObject, GetDIBits, GetObjectW, BITMAP, BITMAPINFO,
-        BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
+        BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HBITMAP, HGDIOBJ,
     };
     use windows::Win32::UI::Shell::{SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_LARGEICON};
     use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetIconInfo, HICON, ICONINFO};
+
+    unsafe fn delete_bitmap(hbmp: HBITMAP) {
+        if !hbmp.is_invalid() {
+            let _ = DeleteObject(HGDIOBJ(hbmp.0));
+        }
+    }
 
     let wide: Vec<u16> = std::ffi::OsStr::new(path)
         .encode_wide()
@@ -377,33 +383,27 @@ fn windows_file_icon(path: &str) -> Option<String> {
             return None;
         }
 
+        let cleanup = |ii: &ICONINFO, hicon: HICON| {
+            delete_bitmap(ii.hbmColor);
+            delete_bitmap(ii.hbmMask);
+            let _ = DestroyIcon(hicon);
+        };
+
         let mut bmp = BITMAP::default();
         if GetObjectW(
-            windows::Win32::Graphics::Gdi::HGDIOBJ(ii.hbmColor.0),
+            HGDIOBJ(ii.hbmColor.0),
             std::mem::size_of::<BITMAP>() as i32,
             Some(&mut bmp as *mut _ as *mut _),
         ) == 0
         {
-            if !ii.hbmColor.is_invalid() {
-                let _ = DeleteObject(ii.hbmColor);
-            }
-            if !ii.hbmMask.is_invalid() {
-                let _ = DeleteObject(ii.hbmMask);
-            }
-            let _ = DestroyIcon(hicon);
+            cleanup(&ii, hicon);
             return None;
         }
 
         let w = bmp.bmWidth;
         let h = bmp.bmHeight;
         if w <= 0 || h <= 0 || w > 512 || h > 512 {
-            if !ii.hbmColor.is_invalid() {
-                let _ = DeleteObject(ii.hbmColor);
-            }
-            if !ii.hbmMask.is_invalid() {
-                let _ = DeleteObject(ii.hbmMask);
-            }
-            let _ = DestroyIcon(hicon);
+            cleanup(&ii, hicon);
             return None;
         }
 
@@ -422,13 +422,7 @@ fn windows_file_icon(path: &str) -> Option<String> {
 
         let hdc = CreateCompatibleDC(None);
         if hdc.is_invalid() {
-            if !ii.hbmColor.is_invalid() {
-                let _ = DeleteObject(ii.hbmColor);
-            }
-            if !ii.hbmMask.is_invalid() {
-                let _ = DeleteObject(ii.hbmMask);
-            }
-            let _ = DestroyIcon(hicon);
+            cleanup(&ii, hicon);
             return None;
         }
 
@@ -444,13 +438,7 @@ fn windows_file_icon(path: &str) -> Option<String> {
         );
 
         let _ = DeleteDC(hdc);
-        if !ii.hbmColor.is_invalid() {
-            let _ = DeleteObject(ii.hbmColor);
-        }
-        if !ii.hbmMask.is_invalid() {
-            let _ = DeleteObject(ii.hbmMask);
-        }
-        let _ = DestroyIcon(hicon);
+        cleanup(&ii, hicon);
 
         if ok == 0 {
             return None;
