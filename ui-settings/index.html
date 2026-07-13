@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WebDock Settings</title>
+    <style>
+      :root { color-scheme: dark; font-family: system-ui, sans-serif; }
+      body { margin: 0; background: #0a0b0d; color: #e8eaed; padding: 1.25rem; }
+      h1 { font-size: 1.1rem; font-weight: 600; }
+      p { color: #9aa0a6; font-size: 0.9rem; line-height: 1.5; }
+      code { background: #1a1c20; padding: 0.1em 0.35em; border-radius: 4px; }
+    </style>
+  </head>
+  <body>
+    <h1>WebDock Settings</h1>
+    <p>
+      Settings UI (Solid/React + specta) lands in <strong>P4</strong>.
+      For now run the headless server:
+    </p>
+    <p><code>cargo run -p webdock-server -- --port 8080</code></p>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

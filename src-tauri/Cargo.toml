@@ -1,0 +1,33 @@
+[package]
+name = "webdock-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "WebDock desktop shell (Tauri 2 — tray & settings; server embedded)"
+default-run = "webdock-app"
+
+[[bin]]
+name = "webdock-app"
+path = "src/main.rs"
+
+[dependencies]
+webdock-core = { workspace = true }
+webdock-server = { workspace = true }
+webdock-platform = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Tauri 2 shell is feature-gated so CI can build server crates without WebView deps.
+# Enable with: cargo run -p webdock-app --features tauri-shell
+tauri = { version = "2", optional = true, features = ["tray-icon"] }
+tauri-plugin-shell = { version = "2", optional = true }
+
+[features]
+default = []
+tauri-shell = ["dep:tauri", "dep:tauri-plugin-shell"]
+
+[build-dependencies]
+tauri-build = { version = "2", optional = true, features = [] }

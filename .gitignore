@@ -1,0 +1,16 @@
+/target
+**/target
+.DS_Store
+dist/
+*.log
+.idea/
+.vscode/
+node_modules/
+ui-settings/dist/
+src-tauri/gen/
+src-tauri/target/
+.webdock-dev/
+*.pdb
+WebRust.app/
+*.app/
+.cargo-cache/

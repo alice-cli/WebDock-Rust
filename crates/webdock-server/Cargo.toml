@@ -1,0 +1,47 @@
+[package]
+name = "webdock-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "HTTP/WebSocket server for WebRust (WebDock-Rust) remote desktop"
+# macOS TCC binds to the on-disk executable name + code signature.
+# Product name is WebRust so permissions are separate from the Swift WebDock.app.
+default-run = "WebRust"
+
+[[bin]]
+name = "WebRust"
+path = "src/main.rs"
+
+[dependencies]
+webdock-protocol = { workspace = true }
+webdock-core = { workspace = true }
+webdock-platform = { workspace = true }
+webdock-encoder = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+axum = { workspace = true }
+tower-http = { workspace = true }
+tower = { workspace = true }
+bytes = { workspace = true }
+futures-util = { workspace = true }
+http = { workspace = true }
+parking_lot = { workspace = true }
+uuid = { workspace = true }
+if-addrs = { workspace = true }
+sysinfo = { workspace = true }
+mime_guess = "2"
+rust-embed = { version = "8", features = ["interpolate-folder-path", "mime-guess"] }
+arboard = "3"
+base64 = { workspace = true }
+
+# macOS desktop shell: settings window + menu bar tray (like Swift WebDock)
+[target.'cfg(target_os = "macos")'.dependencies]
+tao = "0.32"
+wry = "0.50"
+tray-icon = "0.20"
+serde = { workspace = true }
+serde_json = { workspace = true }

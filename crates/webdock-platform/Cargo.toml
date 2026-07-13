@@ -1,0 +1,54 @@
+[package]
+name = "webdock-platform"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "OS abstraction traits and real platform backends for capture/input/window control"
+
+[features]
+default = ["native"]
+## Force mock backends (unit tests only). Production builds use native.
+mock = []
+native = []
+
+[dependencies]
+webdock-protocol = { workspace = true }
+webdock-encoder = { workspace = true }
+thiserror = { workspace = true }
+async-trait = "0.1"
+tokio = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+parking_lot = { workspace = true }
+sysinfo = { workspace = true }
+
+# Real capture / encode / input (all desktop targets)
+xcap = "0.9"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+enigo = "0.6"
+arboard = "3"
+base64 = { workspace = true }
+icns = "0.3"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+dispatch2 = "0.3"
+core-graphics = "0.24"
+core-foundation = "0.10"
+objc2-foundation = { version = "0.3", features = ["NSString", "NSData", "NSDictionary", "NSGeometry"] }
+objc2-app-kit = { version = "0.3", features = [
+    "NSWorkspace",
+    "NSImage",
+    "NSBitmapImageRep",
+    "NSPasteboard",
+] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_Threading",
+] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
