@@ -5973,6 +5973,7 @@ dependencies = [
 name = "webdock-encoder"
 version = "0.1.1"
 dependencies = [
+ "base64 0.22.1",
  "core-foundation",
  "openh264",
  "thiserror 2.0.18",
@@ -6048,6 +6049,7 @@ dependencies = [
  "webdock-encoder",
  "webdock-platform",
  "webdock-protocol",
+ "windows 0.61.3",
  "wry 0.50.5",
 ]
 

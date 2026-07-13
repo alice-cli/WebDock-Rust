@@ -415,10 +415,11 @@ fn handle_client_text(
                 cfg.format = fmt;
                 if fmt == StreamFormat::H264 {
                     cfg.fps = cfg.fps.max(24).min(30);
+                    // SW OpenH264 (Win/Linux) can't hold 1920 realtime — clamp harder.
                     cfg.max_width = cfg
                         .max_width
                         .max(1280)
-                        .min(webdock_core::tuning::BROADCAST_MAX_WIDTH);
+                        .min(webdock_core::tuning::h264_max_width());
                     cfg.bitrate_bps = cfg
                         .bitrate_bps
                         .max(webdock_core::tuning::BROADCAST_BITRATE_BPS)
@@ -443,10 +444,10 @@ fn handle_client_text(
                     cfg.bitrate_bps = 1_600_000;
                 }
                 "broadcast" | "high" | "live" | "h264" => {
-                    // HW VideoToolbox (macOS) or OpenH264 SW: 30fps, up to 1080p.
+                    // HW VideoToolbox (macOS): 1080p30. SW OpenH264: 720p-class.
                     cfg.fps = 30;
                     cfg.jpeg_quality = 1.0;
-                    cfg.max_width = webdock_core::tuning::BROADCAST_MAX_WIDTH;
+                    cfg.max_width = webdock_core::tuning::h264_max_width();
                     cfg.format = webdock_platform::StreamFormat::H264;
                     cfg.bitrate_bps = webdock_core::tuning::BROADCAST_BITRATE_BPS;
                 }

@@ -120,6 +120,12 @@ impl CaptureBackend for NativeCapture {
                         continue;
                     }
                     let path = super::icons::path_for_pid(pid);
+                    // Shell chrome by exe basename — app_name comes from localized
+                    // version resources ("Windows 탐색기", "Explorateur Windows"),
+                    // so the name lists above miss them on non-English systems.
+                    if is_system_process(path.as_deref(), &title) {
+                        continue;
+                    }
                     let icon_key = path.clone().unwrap_or_else(|| format!("pid:{pid}"));
                     let icon = super::icons::data_url_for_key(&icon_key);
                     out.push(WindowInfo {
@@ -606,6 +612,69 @@ fn is_system_app(name: &str) -> bool {
         }
     }
 
+    false
+}
+
+/// Shell/desktop processes by executable basename. App display names are
+/// localized (version resources / .desktop Name=), exe names are not — this
+/// catches "Windows 탐색기" (explorer.exe) etc. that the name lists miss.
+fn is_system_process(exe_path: Option<&str>, title: &str) -> bool {
+    let Some(p) = exe_path else { return false };
+    let stem = std::path::Path::new(p)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if stem.is_empty() {
+        return false;
+    }
+    const SHELL_EXE: &[&str] = &[
+        // Windows
+        "searchhost",
+        "searchapp",
+        "searchui",
+        "startmenuexperiencehost",
+        "shellexperiencehost",
+        "textinputhost",
+        "lockapp",
+        "logonui",
+        "widgets",
+        "widgetservice",
+        "gamebar",
+        "gamebarftserver",
+        "sihost",
+        "ctfmon",
+        "conhost",
+        "dwm",
+        "phoneexperiencehost",
+        "crossdeviceresume",
+        "securityhealthsystray",
+        // Linux shells / panels
+        "gnome-shell",
+        "plasmashell",
+        "kwin_x11",
+        "kwin_wayland",
+        "xfce4-panel",
+        "xfdesktop",
+        "lxpanel",
+        "lxqt-panel",
+        "mate-panel",
+        "budgie-panel",
+        "polybar",
+        "waybar",
+        "plank",
+    ];
+    if SHELL_EXE.contains(&stem.as_str()) {
+        return true;
+    }
+    // explorer.exe: keep real File Explorer folder windows (they carry a
+    // folder-name title); drop taskbar/desktop chrome.
+    if stem == "explorer" {
+        let t = title.trim();
+        return t.is_empty()
+            || t.eq_ignore_ascii_case("program manager")
+            || t.eq_ignore_ascii_case("desktop");
+    }
     false
 }
 

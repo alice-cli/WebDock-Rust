@@ -27,9 +27,17 @@ enum Inner {
 
 impl H264Session {
     /// Open the best available encoder for this platform.
+    ///
+    /// `WEBRUST_H264_BACKEND=sw` forces OpenH264 — lets a macOS host exercise
+    /// the exact Windows/Linux software path for debugging.
     pub fn open(width: u32, height: u32, fps: u32, bitrate_bps: u32) -> Result<Self, H264Error> {
+        let force_sw = std::env::var("WEBRUST_H264_BACKEND")
+            .map(|v| v.eq_ignore_ascii_case("sw") || v.eq_ignore_ascii_case("openh264"))
+            .unwrap_or(false);
+        #[cfg(not(target_os = "macos"))]
+        let _ = force_sw;
         #[cfg(target_os = "macos")]
-        {
+        if !force_sw {
             match VtEncoder::new(width, height, fps, bitrate_bps) {
                 Ok(vt) => {
                     info!(

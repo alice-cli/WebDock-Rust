@@ -109,6 +109,9 @@ impl NativeInput {
             }
         }
         let _ = self.windows.raise(t);
+        // Fresh raise: give the WM a beat to commit z-order/focus so the very
+        // first click lands on the target window, not the previous occluder.
+        std::thread::sleep(Duration::from_millis(50));
         let mut g = self.focus.lock();
         match g.as_mut() {
             Some(c) if c.route == rid => c.raised_at = Instant::now(),

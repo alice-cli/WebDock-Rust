@@ -1,7 +1,10 @@
 //! WebRust — remote desktop host.
 //!
-//! Default: **settings GUI + system tray** on macOS / Windows / Linux.  
+//! Default: **settings GUI + system tray** on macOS / Windows / Linux.
 //! Headless: `WebRust --cli --port 8090`
+// GUI subsystem on Windows: no console window on double-click.
+// CLI/terminal output is restored via AttachConsole below.
+#![cfg_attr(windows, windows_subsystem = "windows")]
 
 use std::fs::OpenOptions;
 use std::path::PathBuf;
@@ -11,7 +14,22 @@ use webdock_core::AppConfig;
 use webdock_platform;
 use webdock_server::{lan_addresses, start, ServerOptions};
 
+/// With `windows_subsystem = "windows"` the process has no console, so
+/// `println!`/`eprintln!` go nowhere even when launched from cmd/PowerShell.
+/// Attaching to the parent's console (if any) restores terminal output for
+/// `--cli`, `--help`, `--version`, etc. Must run before the first print.
+#[cfg(windows)]
+fn attach_parent_console() {
+    use windows::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
+    unsafe {
+        let _ = AttachConsole(ATTACH_PARENT_PROCESS);
+    }
+}
+
 fn main() {
+    #[cfg(windows)]
+    attach_parent_console();
+
     let args: Vec<String> = std::env::args().skip(1).collect();
     let want_cli = args.iter().any(|a| a == "--cli" || a == "--headless");
 

@@ -341,77 +341,92 @@ fn macos_nsworkspace_icon(path: &str) -> Option<String> {
 // ═══════════════════════════════════════════════════════════════════════
 
 #[cfg(target_os = "windows")]
-fn windows_file_icon(path: &str) -> Option<String> {
+fn to_wide(s: &str) -> Vec<u16> {
     use std::os::windows::ffi::OsStrExt;
-    use windows::core::PCWSTR;
-    use windows::Win32::Graphics::Gdi::{
-        CreateCompatibleDC, DeleteDC, DeleteObject, GetDIBits, GetObjectW, BITMAP, BITMAPINFO,
-        BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HBITMAP, HGDIOBJ,
-    };
-    use windows::Win32::UI::Shell::{SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_LARGEICON};
-    use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetIconInfo, HICON, ICONINFO};
-
-    unsafe fn delete_bitmap(hbmp: HBITMAP) {
-        if !hbmp.is_invalid() {
-            let _ = DeleteObject(HGDIOBJ(hbmp.0));
-        }
-    }
-
-    let wide: Vec<u16> = std::ffi::OsStr::new(path)
+    std::ffi::OsStr::new(s)
         .encode_wide()
         .chain(std::iter::once(0))
-        .collect();
+        .collect()
+}
+
+/// Scoped COM init. `SHGetFileInfoW` on `.lnk` files and `IShellLinkW` both
+/// REQUIRE CoInitialize on the calling thread — without it every Start-Menu
+/// shortcut silently yields no icon (the original "most apps have no icon" bug:
+/// these run on tokio blocking threads that never initialized COM).
+#[cfg(target_os = "windows")]
+struct ComGuard {
+    uninit: bool,
+}
+
+#[cfg(target_os = "windows")]
+impl ComGuard {
+    fn new() -> Self {
+        use windows::Win32::System::Com::{
+            CoInitializeEx, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE,
+        };
+        let hr = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) };
+        // S_OK / S_FALSE → balance with CoUninitialize; RPC_E_CHANGED_MODE → don't.
+        Self { uninit: hr.is_ok() }
+    }
+}
+
+#[cfg(target_os = "windows")]
+impl Drop for ComGuard {
+    fn drop(&mut self) {
+        if self.uninit {
+            unsafe { windows::Win32::System::Com::CoUninitialize() };
+        }
+    }
+}
+
+/// Resolve a `.lnk` shortcut to its target path (needs COM).
+#[cfg(target_os = "windows")]
+fn resolve_lnk_target(path: &str) -> Option<String> {
+    use windows::core::{Interface, PCWSTR};
+    use windows::Win32::Storage::FileSystem::WIN32_FIND_DATAW;
+    use windows::Win32::System::Com::{
+        CoCreateInstance, IPersistFile, CLSCTX_INPROC_SERVER, STGM_READ,
+    };
+    use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
 
     unsafe {
-        let mut sfi = SHFILEINFOW::default();
-        let flags = SHGFI_ICON | SHGFI_LARGEICON;
-        let r = SHGetFileInfoW(
-            PCWSTR(wide.as_ptr()),
-            windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES(0),
-            Some(&mut sfi),
-            std::mem::size_of::<SHFILEINFOW>() as u32,
-            flags,
-        );
-        if r == 0 || sfi.hIcon.is_invalid() {
+        let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).ok()?;
+        let persist: IPersistFile = link.cast().ok()?;
+        let wide = to_wide(path);
+        persist.Load(PCWSTR(wide.as_ptr()), STGM_READ).ok()?;
+        let mut buf = [0u16; 1024];
+        let mut fd = WIN32_FIND_DATAW::default();
+        link.GetPath(&mut buf, &mut fd, 0).ok()?;
+        let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+        if len == 0 {
             return None;
         }
-        let hicon: HICON = sfi.hIcon;
+        Some(String::from_utf16_lossy(&buf[..len]))
+    }
+}
 
-        let mut ii = ICONINFO::default();
-        if GetIconInfo(hicon, &mut ii).is_err() {
-            let _ = DestroyIcon(hicon);
+/// Render an HICON to 32×32 RGBA via DrawIconEx into a top-down 32bpp DIB.
+/// Unlike reading `ICONINFO.hbmColor` directly, this also handles legacy
+/// mask-only / monochrome icons.
+#[cfg(target_os = "windows")]
+fn hicon_to_data_url(hicon: windows::Win32::UI::WindowsAndMessaging::HICON) -> Option<String> {
+    use windows::Win32::Graphics::Gdi::{
+        CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, SelectObject, BITMAPINFO,
+        BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HGDIOBJ,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{DrawIconEx, DI_NORMAL};
+
+    const SZ: i32 = 32;
+    unsafe {
+        let hdc = CreateCompatibleDC(None);
+        if hdc.is_invalid() {
             return None;
         }
-
-        let cleanup = |ii: &ICONINFO, hicon: HICON| {
-            delete_bitmap(ii.hbmColor);
-            delete_bitmap(ii.hbmMask);
-            let _ = DestroyIcon(hicon);
-        };
-
-        let mut bmp = BITMAP::default();
-        if GetObjectW(
-            HGDIOBJ(ii.hbmColor.0),
-            std::mem::size_of::<BITMAP>() as i32,
-            Some(&mut bmp as *mut _ as *mut _),
-        ) == 0
-        {
-            cleanup(&ii, hicon);
-            return None;
-        }
-
-        let w = bmp.bmWidth;
-        let h = bmp.bmHeight;
-        if w <= 0 || h <= 0 || w > 512 || h > 512 {
-            cleanup(&ii, hicon);
-            return None;
-        }
-
-        let mut bmi = BITMAPINFO {
+        let bmi = BITMAPINFO {
             bmiHeader: BITMAPINFOHEADER {
                 biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                biWidth: w,
-                biHeight: -h, // top-down
+                biWidth: SZ,
+                biHeight: -SZ, // top-down
                 biPlanes: 1,
                 biBitCount: 32,
                 biCompression: BI_RGB.0 as u32,
@@ -419,28 +434,23 @@ fn windows_file_icon(path: &str) -> Option<String> {
             },
             ..Default::default()
         };
-
-        let hdc = CreateCompatibleDC(None);
-        if hdc.is_invalid() {
-            cleanup(&ii, hicon);
+        let mut bits: *mut core::ffi::c_void = std::ptr::null_mut();
+        let Ok(dib) = CreateDIBSection(Some(hdc), &bmi, DIB_RGB_COLORS, &mut bits, None, 0) else {
+            let _ = DeleteDC(hdc);
             return None;
+        };
+        let old = SelectObject(hdc, HGDIOBJ(dib.0));
+        let drew = DrawIconEx(hdc, 0, 0, hicon, SZ, SZ, 0, None, DI_NORMAL).is_ok();
+        // Flush GDI before reading the DIB bits.
+        let _ = windows::Win32::Graphics::Gdi::GdiFlush();
+        let mut pixels = vec![0u8; (SZ * SZ * 4) as usize];
+        if drew && !bits.is_null() {
+            std::ptr::copy_nonoverlapping(bits as *const u8, pixels.as_mut_ptr(), pixels.len());
         }
-
-        let mut pixels = vec![0u8; (w * h * 4) as usize];
-        let ok = GetDIBits(
-            hdc,
-            ii.hbmColor,
-            0,
-            h as u32,
-            Some(pixels.as_mut_ptr() as *mut _),
-            &mut bmi,
-            DIB_RGB_COLORS,
-        );
-
+        SelectObject(hdc, old);
+        let _ = DeleteObject(HGDIOBJ(dib.0));
         let _ = DeleteDC(hdc);
-        cleanup(&ii, hicon);
-
-        if ok == 0 {
+        if !drew {
             return None;
         }
 
@@ -448,10 +458,85 @@ fn windows_file_icon(path: &str) -> Option<String> {
         for chunk in pixels.chunks_exact_mut(4) {
             chunk.swap(0, 2);
         }
+        // Legacy AND/XOR-mask icons draw with alpha 0 everywhere — treat any
+        // colored pixel as opaque so the icon isn't invisible.
+        if pixels.chunks_exact(4).all(|p| p[3] == 0) {
+            for p in pixels.chunks_exact_mut(4) {
+                if p[0] != 0 || p[1] != 0 || p[2] != 0 {
+                    p[3] = 255;
+                }
+            }
+        }
+        if pixels.chunks_exact(4).all(|p| p[3] == 0) {
+            return None; // genuinely empty
+        }
 
-        let buf: image::RgbaImage = ImageBuffer::from_raw(w as u32, h as u32, pixels)?;
-        let resized = image::imageops::resize(&buf, 32, 32, image::imageops::FilterType::Triangle);
-        rgba_to_data_url(&resized)
+        let buf: image::RgbaImage = ImageBuffer::from_raw(SZ as u32, SZ as u32, pixels)?;
+        rgba_to_data_url(&buf)
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn windows_file_icon(path: &str) -> Option<String> {
+    use windows::core::PCWSTR;
+    use windows::Win32::UI::Shell::{
+        ExtractIconExW, SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_LARGEICON,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, HICON};
+
+    let _com = ComGuard::new();
+
+    unsafe fn shell_icon(path: &str) -> Option<HICON> {
+        let wide = to_wide(path);
+        let mut sfi = SHFILEINFOW::default();
+        let r = SHGetFileInfoW(
+            PCWSTR(wide.as_ptr()),
+            windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES(0),
+            Some(&mut sfi),
+            std::mem::size_of::<SHFILEINFOW>() as u32,
+            SHGFI_ICON | SHGFI_LARGEICON,
+        );
+        if r == 0 || sfi.hIcon.is_invalid() {
+            None
+        } else {
+            Some(sfi.hIcon)
+        }
+    }
+
+    unsafe {
+        // 1) Shell icon for the path as given (.exe or .lnk).
+        let mut hicon = shell_icon(path);
+
+        // 2) .lnk that the shell couldn't resolve → follow the target ourselves.
+        let is_lnk = path.to_ascii_lowercase().ends_with(".lnk");
+        let target = if hicon.is_none() && is_lnk {
+            resolve_lnk_target(path)
+        } else {
+            None
+        };
+        if hicon.is_none() {
+            if let Some(t) = &target {
+                hicon = shell_icon(t);
+            }
+        }
+
+        // 3) Last resort: first icon resource embedded in the exe.
+        if hicon.is_none() {
+            let exe = target.as_deref().unwrap_or(path);
+            if exe.to_ascii_lowercase().ends_with(".exe") {
+                let wide = to_wide(exe);
+                let mut big = HICON::default();
+                let n = ExtractIconExW(PCWSTR(wide.as_ptr()), 0, Some(&mut big), None, 1);
+                if n > 0 && !big.is_invalid() {
+                    hicon = Some(big);
+                }
+            }
+        }
+
+        let hicon = hicon?;
+        let url = hicon_to_data_url(hicon);
+        let _ = DestroyIcon(hicon);
+        url
     }
 }
 

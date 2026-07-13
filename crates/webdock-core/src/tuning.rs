@@ -25,6 +25,20 @@ pub const BROADCAST_BITRATE_BPS: u32 = 6_000_000;
 /// layer may clamp further when soft backend is active.
 pub const BROADCAST_MAX_WIDTH: u32 = 1920;
 
+/// Max capture width when H.264 runs on the **software** OpenH264 backend
+/// (Windows/Linux — no HW encoder wired yet). 1920 software encode misses the
+/// frame period on typical CPUs → stream looks frozen.
+pub const H264_SW_MAX_WIDTH: u32 = 1280;
+
+/// Effective H.264 width cap for this host (HW on macOS, SW elsewhere).
+pub fn h264_max_width() -> u32 {
+    if cfg!(target_os = "macos") {
+        BROADCAST_MAX_WIDTH
+    } else {
+        H264_SW_MAX_WIDTH
+    }
+}
+
 /// Min interval between live H.264 encoder recreates (bitrate adapt).
 pub const H264_RECONFIG_MIN_SECS: f64 = 4.0;
 

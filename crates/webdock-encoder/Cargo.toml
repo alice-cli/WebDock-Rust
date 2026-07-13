@@ -13,3 +13,6 @@ openh264 = { version = "0.9", default-features = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10"
+
+[dev-dependencies]
+base64 = { workspace = true }
