@@ -1,6 +1,8 @@
 //! App icon → `data:image/png;base64,...` for the browser sidebar.
 //!
-//! Matches Swift `IconCache` behavior (NSWorkspace / .app icns).
+//! - macOS: `.icns` + NSWorkspace
+//! - Windows: Shell `SHGetFileInfo` / `ExtractIconEx` from .exe/.lnk
+//! - Linux: FreeDesktop icon theme + `.desktop` Icon= field
 
 use std::collections::HashMap;
 use std::io::Cursor;
@@ -25,6 +27,7 @@ pub fn data_url_for_key(key: &str) -> Option<String> {
     if key.is_empty() || key == "system:display" {
         return display_icon_data_url();
     }
+    // pid-only keys have no filesystem path — try platform fallbacks later.
     {
         let g = cache().lock();
         if let Some(hit) = g.get(key) {
@@ -37,29 +40,84 @@ pub fn data_url_for_key(key: &str) -> Option<String> {
 }
 
 fn resolve_uncached(key: &str) -> Option<String> {
-    // 1) Fast path: parse .icns from the .app bundle (bulk app list).
     let path = Path::new(key);
-    if let Some(app) = find_app_bundle(path).or_else(|| {
-        if path.extension().and_then(|e| e.to_str()) == Some("app") {
-            Some(path.to_path_buf())
-        } else {
-            None
-        }
-    }) {
-        if let Some(icns) = find_icns_in_app(&app) {
-            if let Some(png) = icns_file_to_png(&icns, 32) {
-                return Some(format!("data:image/png;base64,{}", STANDARD.encode(png)));
-            }
-        }
-    }
 
-    // 2) NSWorkspace covers Assets.car / modern icons (slower; used for window list).
+    // ── macOS .app / .icns ──────────────────────────────────────────────
     #[cfg(target_os = "macos")]
     {
+        if let Some(app) = find_app_bundle(path).or_else(|| {
+            if path.extension().and_then(|e| e.to_str()) == Some("app") {
+                Some(path.to_path_buf())
+            } else {
+                None
+            }
+        }) {
+            if let Some(icns) = find_icns_in_app(&app) {
+                if let Some(png) = icns_file_to_png(&icns, 32) {
+                    return Some(format!("data:image/png;base64,{}", STANDARD.encode(png)));
+                }
+            }
+        }
         if let Some(url) = macos_nsworkspace_icon(key) {
             return Some(url);
         }
     }
+
+    // ── Windows .exe / .lnk / file path ─────────────────────────────────
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(url) = windows_file_icon(key) {
+            return Some(url);
+        }
+        // pid:N → resolve exe path
+        if let Some(pid_s) = key.strip_prefix("pid:") {
+            if let Ok(pid) = pid_s.parse::<u32>() {
+                if let Some(exe) = path_for_pid(pid as i32) {
+                    if let Some(url) = windows_file_icon(&exe) {
+                        return Some(url);
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Linux FreeDesktop / .desktop / exe ──────────────────────────────
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(url) = linux_icon_for_key(key) {
+            return Some(url);
+        }
+        if let Some(pid_s) = key.strip_prefix("pid:") {
+            if let Ok(pid) = pid_s.parse::<i32>() {
+                if let Some(exe) = path_for_pid(pid) {
+                    if let Some(url) = linux_icon_for_key(&exe) {
+                        return Some(url);
+                    }
+                }
+            }
+        }
+    }
+
+    // Generic: if key is an image file path, load it.
+    if path.is_file() {
+        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+            let ext = ext.to_ascii_lowercase();
+            if matches!(
+                ext.as_str(),
+                "png" | "jpg" | "jpeg" | "ico" | "bmp" | "gif" | "webp"
+            ) {
+                if let Ok(data) = std::fs::read(path) {
+                    if let Ok(img) = image::load_from_memory(&data) {
+                        let rgba = img
+                            .resize(32, 32, image::imageops::FilterType::Triangle)
+                            .to_rgba8();
+                        return rgba_to_data_url(&rgba);
+                    }
+                }
+            }
+        }
+    }
+
     None
 }
 
@@ -74,10 +132,22 @@ pub fn path_for_pid(pid: i32) -> Option<String> {
     sys.refresh_processes(ProcessesToUpdate::Some(&[spid]), true);
     let proc = sys.process(spid)?;
     let exe = proc.exe()?;
-    let app = find_app_bundle(exe).unwrap_or_else(|| exe.to_path_buf());
-    Some(app.to_string_lossy().into_owned())
+    #[cfg(target_os = "macos")]
+    {
+        let app = find_app_bundle(exe).unwrap_or_else(|| exe.to_path_buf());
+        return Some(app.to_string_lossy().into_owned());
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Some(exe.to_string_lossy().into_owned())
+    }
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// macOS helpers
+// ═══════════════════════════════════════════════════════════════════════
+
+#[cfg(target_os = "macos")]
 fn find_app_bundle(path: &Path) -> Option<PathBuf> {
     let mut p = path.to_path_buf();
     loop {
@@ -90,12 +160,12 @@ fn find_app_bundle(path: &Path) -> Option<PathBuf> {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn find_icns_in_app(app: &Path) -> Option<PathBuf> {
     let resources = app.join("Contents/Resources");
     if !resources.is_dir() {
         return None;
     }
-    // Info.plist CFBundleIconFile
     if let Some(name) = read_bundle_icon_name(app) {
         let candidates = [
             resources.join(format!("{name}.icns")),
@@ -113,7 +183,6 @@ fn find_icns_in_app(app: &Path) -> Option<PathBuf> {
             return Some(p);
         }
     }
-    // First .icns in Resources
     let rd = std::fs::read_dir(&resources).ok()?;
     for entry in rd.flatten() {
         let p = entry.path();
@@ -124,10 +193,10 @@ fn find_icns_in_app(app: &Path) -> Option<PathBuf> {
     None
 }
 
+#[cfg(target_os = "macos")]
 fn read_bundle_icon_name(app: &Path) -> Option<String> {
     let plist = app.join("Contents/Info.plist");
     let text = std::fs::read_to_string(&plist).ok()?;
-    // Very small XML/plist scanner for CFBundleIconFile / CFBundleIconName
     for key in ["CFBundleIconFile", "CFBundleIconName"] {
         if let Some(v) = plist_string_value(&text, key) {
             return Some(v);
@@ -136,8 +205,8 @@ fn read_bundle_icon_name(app: &Path) -> Option<String> {
     None
 }
 
+#[cfg(target_os = "macos")]
 fn plist_string_value(plist: &str, key: &str) -> Option<String> {
-    // <key>CFBundleIconFile</key>\n\t<string>AppIcon</string>
     let needle = format!("<key>{key}</key>");
     let idx = plist.find(&needle)?;
     let rest = &plist[idx + needle.len()..];
@@ -151,10 +220,10 @@ fn plist_string_value(plist: &str, key: &str) -> Option<String> {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn icns_file_to_png(path: &Path, size: u32) -> Option<Vec<u8>> {
     let data = std::fs::read(path).ok()?;
     let family = icns::IconFamily::read(Cursor::new(&data)).ok()?;
-    // Prefer sizes near target
     let types = [
         icns::IconType::RGBA32_32x32,
         icns::IconType::RGBA32_32x32_2x,
@@ -172,7 +241,6 @@ fn icns_file_to_png(path: &Path, size: u32) -> Option<Vec<u8>> {
             break;
         }
     }
-    // Prefer any available icon if preferred types missing.
     if image.is_none() {
         for t in family.available_icons() {
             if let Ok(img) = family.get_icon_with_type(t) {
@@ -239,7 +307,6 @@ fn macos_nsworkspace_icon(path: &str) -> Option<String> {
 
     autoreleasepool(|_| {
         let ns_path = NSString::from_str(path);
-        // If path is inside .app, use bundle root for better icon.
         let path_obj = {
             let p = Path::new(path);
             if let Some(app) = find_app_bundle(p) {
@@ -248,20 +315,18 @@ fn macos_nsworkspace_icon(path: &str) -> Option<String> {
                 ns_path
             }
         };
-        let workspace = unsafe { NSWorkspace::sharedWorkspace() };
-        let image = unsafe { workspace.iconForFile(&path_obj) };
-        // Force 32pt
-        unsafe {
-            image.setSize(objc2_foundation::NSSize {
-                width: 32.0,
-                height: 32.0,
-            });
-        }
-        let tiff = unsafe { image.TIFFRepresentation() }?;
+        let workspace = NSWorkspace::sharedWorkspace();
+        let image = workspace.iconForFile(&path_obj);
+        image.setSize(objc2_foundation::NSSize {
+            width: 32.0,
+            height: 32.0,
+        });
+        let tiff = image.TIFFRepresentation()?;
         let rep = NSBitmapImageRep::imageRepWithData(&tiff)?;
         let props = NSDictionary::new();
+        // SAFETY: PNG representation of an NSImage-derived bitmap is a standard AppKit path.
         let png =
-            unsafe { rep.representationUsingType_properties(NSBitmapImageFileType::PNG, &props) }?;
+            unsafe { rep.representationUsingType_properties(NSBitmapImageFileType::PNG, &props)? };
         let bytes = png.to_vec();
         if bytes.is_empty() {
             return None;
@@ -271,14 +336,311 @@ fn macos_nsworkspace_icon(path: &str) -> Option<String> {
     })
 }
 
-/// Tiny built-in display glyph (16×16 blue monitor-ish PNG) as data URL.
+// ═══════════════════════════════════════════════════════════════════════
+// Windows helpers
+// ═══════════════════════════════════════════════════════════════════════
+
+#[cfg(target_os = "windows")]
+fn windows_file_icon(path: &str) -> Option<String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::core::PCWSTR;
+    use windows::Win32::Graphics::Gdi::{
+        CreateCompatibleDC, DeleteDC, DeleteObject, GetDIBits, GetObjectW, BITMAP, BITMAPINFO,
+        BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
+    };
+    use windows::Win32::UI::Shell::{SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_LARGEICON};
+    use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetIconInfo, HICON, ICONINFO};
+
+    let wide: Vec<u16> = std::ffi::OsStr::new(path)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    unsafe {
+        let mut sfi = SHFILEINFOW::default();
+        let flags = SHGFI_ICON | SHGFI_LARGEICON;
+        let r = SHGetFileInfoW(
+            PCWSTR(wide.as_ptr()),
+            windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES(0),
+            Some(&mut sfi),
+            std::mem::size_of::<SHFILEINFOW>() as u32,
+            flags,
+        );
+        if r == 0 || sfi.hIcon.is_invalid() {
+            return None;
+        }
+        let hicon: HICON = sfi.hIcon;
+
+        let mut ii = ICONINFO::default();
+        if GetIconInfo(hicon, &mut ii).is_err() {
+            let _ = DestroyIcon(hicon);
+            return None;
+        }
+
+        let mut bmp = BITMAP::default();
+        if GetObjectW(
+            windows::Win32::Graphics::Gdi::HGDIOBJ(ii.hbmColor.0),
+            std::mem::size_of::<BITMAP>() as i32,
+            Some(&mut bmp as *mut _ as *mut _),
+        ) == 0
+        {
+            if !ii.hbmColor.is_invalid() {
+                let _ = DeleteObject(ii.hbmColor);
+            }
+            if !ii.hbmMask.is_invalid() {
+                let _ = DeleteObject(ii.hbmMask);
+            }
+            let _ = DestroyIcon(hicon);
+            return None;
+        }
+
+        let w = bmp.bmWidth;
+        let h = bmp.bmHeight;
+        if w <= 0 || h <= 0 || w > 512 || h > 512 {
+            if !ii.hbmColor.is_invalid() {
+                let _ = DeleteObject(ii.hbmColor);
+            }
+            if !ii.hbmMask.is_invalid() {
+                let _ = DeleteObject(ii.hbmMask);
+            }
+            let _ = DestroyIcon(hicon);
+            return None;
+        }
+
+        let mut bmi = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: w,
+                biHeight: -h, // top-down
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0 as u32,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let hdc = CreateCompatibleDC(None);
+        if hdc.is_invalid() {
+            if !ii.hbmColor.is_invalid() {
+                let _ = DeleteObject(ii.hbmColor);
+            }
+            if !ii.hbmMask.is_invalid() {
+                let _ = DeleteObject(ii.hbmMask);
+            }
+            let _ = DestroyIcon(hicon);
+            return None;
+        }
+
+        let mut pixels = vec![0u8; (w * h * 4) as usize];
+        let ok = GetDIBits(
+            hdc,
+            ii.hbmColor,
+            0,
+            h as u32,
+            Some(pixels.as_mut_ptr() as *mut _),
+            &mut bmi,
+            DIB_RGB_COLORS,
+        );
+
+        let _ = DeleteDC(hdc);
+        if !ii.hbmColor.is_invalid() {
+            let _ = DeleteObject(ii.hbmColor);
+        }
+        if !ii.hbmMask.is_invalid() {
+            let _ = DeleteObject(ii.hbmMask);
+        }
+        let _ = DestroyIcon(hicon);
+
+        if ok == 0 {
+            return None;
+        }
+
+        // BGRA → RGBA
+        for chunk in pixels.chunks_exact_mut(4) {
+            chunk.swap(0, 2);
+        }
+
+        let buf: image::RgbaImage = ImageBuffer::from_raw(w as u32, h as u32, pixels)?;
+        let resized = image::imageops::resize(&buf, 32, 32, image::imageops::FilterType::Triangle);
+        rgba_to_data_url(&resized)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Linux helpers
+// ═══════════════════════════════════════════════════════════════════════
+
+#[cfg(target_os = "linux")]
+fn linux_icon_for_key(key: &str) -> Option<String> {
+    let path = Path::new(key);
+
+    // .desktop file → Icon= field
+    if path.extension().and_then(|e| e.to_str()) == Some("desktop") {
+        if let Some(icon_name) = parse_desktop_icon(path) {
+            if let Some(url) = resolve_linux_icon_name(&icon_name) {
+                return Some(url);
+            }
+        }
+    }
+
+    // Absolute image path
+    if path.is_file() {
+        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+            let ext = ext.to_ascii_lowercase();
+            if matches!(ext.as_str(), "png" | "svg" | "xpm" | "jpg" | "jpeg") {
+                // SVG/XPM: try as-is via image crate (png/jpg only reliably)
+                if matches!(ext.as_str(), "png" | "jpg" | "jpeg") {
+                    if let Ok(data) = std::fs::read(path) {
+                        if let Ok(img) = image::load_from_memory(&data) {
+                            let rgba = img
+                                .resize(32, 32, image::imageops::FilterType::Triangle)
+                                .to_rgba8();
+                            return rgba_to_data_url(&rgba);
+                        }
+                    }
+                }
+            }
+        }
+        // Executable: look up by basename in icon themes
+        if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
+            if let Some(url) = resolve_linux_icon_name(name) {
+                return Some(url);
+            }
+            // Try lowercase
+            if let Some(url) = resolve_linux_icon_name(&name.to_ascii_lowercase()) {
+                return Some(url);
+            }
+        }
+    }
+
+    // Bare icon name (no path)
+    if !key.contains('/') {
+        return resolve_linux_icon_name(key);
+    }
+
+    None
+}
+
+#[cfg(target_os = "linux")]
+fn parse_desktop_icon(path: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(path).ok()?;
+    for line in text.lines() {
+        if let Some(v) = line.strip_prefix("Icon=") {
+            let v = v.trim();
+            if !v.is_empty() {
+                return Some(v.to_string());
+            }
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "linux")]
+fn resolve_linux_icon_name(name: &str) -> Option<String> {
+    // Absolute path in Icon=
+    let p = Path::new(name);
+    if p.is_absolute() && p.is_file() {
+        if let Ok(data) = std::fs::read(p) {
+            if let Ok(img) = image::load_from_memory(&data) {
+                let rgba = img
+                    .resize(32, 32, image::imageops::FilterType::Triangle)
+                    .to_rgba8();
+                return rgba_to_data_url(&rgba);
+            }
+        }
+    }
+
+    let home = std::env::var("HOME").unwrap_or_default();
+    let sizes = [
+        "32x32", "48x48", "24x24", "64x64", "16x16", "128x128", "scalable",
+    ];
+    let themes = [
+        "hicolor", "Adwaita", "breeze", "Papirus", "Yaru", "Humanity",
+    ];
+    let categories = [
+        "apps",
+        "applications",
+        "mimetypes",
+        "places",
+        "status",
+        "devices",
+    ];
+    let bases = [
+        format!("{home}/.local/share/icons"),
+        format!("{home}/.icons"),
+        "/usr/share/icons".into(),
+        "/usr/local/share/icons".into(),
+        "/usr/share/pixmaps".into(),
+    ];
+
+    // Direct pixmap
+    for base in &["/usr/share/pixmaps", "/usr/local/share/pixmaps"] {
+        for ext in &["png", "xpm", "svg"] {
+            let candidate = PathBuf::from(base).join(format!("{name}.{ext}"));
+            if candidate.is_file() && *ext != "svg" && *ext != "xpm" {
+                if let Ok(data) = std::fs::read(&candidate) {
+                    if let Ok(img) = image::load_from_memory(&data) {
+                        let rgba = img
+                            .resize(32, 32, image::imageops::FilterType::Triangle)
+                            .to_rgba8();
+                        return rgba_to_data_url(&rgba);
+                    }
+                }
+            }
+        }
+    }
+
+    for base in &bases {
+        for theme in &themes {
+            for size in &sizes {
+                for cat in &categories {
+                    for ext in &["png"] {
+                        let candidate = PathBuf::from(base)
+                            .join(theme)
+                            .join(size)
+                            .join(cat)
+                            .join(format!("{name}.{ext}"));
+                        if candidate.is_file() {
+                            if let Ok(data) = std::fs::read(&candidate) {
+                                if let Ok(img) = image::load_from_memory(&data) {
+                                    let rgba = img
+                                        .resize(32, 32, image::imageops::FilterType::Triangle)
+                                        .to_rgba8();
+                                    return rgba_to_data_url(&rgba);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Shared helpers
+// ═══════════════════════════════════════════════════════════════════════
+
+fn rgba_to_data_url(img: &image::RgbaImage) -> Option<String> {
+    let (w, h) = img.dimensions();
+    let mut out = Cursor::new(Vec::new());
+    let enc = PngEncoder::new(&mut out);
+    enc.write_image(img.as_raw(), w, h, ColorType::Rgba8.into())
+        .ok()?;
+    Some(format!(
+        "data:image/png;base64,{}",
+        STANDARD.encode(out.into_inner())
+    ))
+}
+
+/// Tiny built-in display glyph (32×32) as data URL.
 fn display_icon_data_url() -> Option<String> {
-    // 1x1 transparent is useless; generate a simple 32x32 PNG programmatically.
     let size = 32u32;
     let mut img = image::RgbaImage::new(size, size);
     for y in 0..size {
         for x in 0..size {
-            // rounded rect body
             let border = x < 2 || y < 2 || x >= size - 2 || y >= size - 2;
             let stand = y > 24 && x > 10 && x < 22;
             let base = y > 28 && x > 6 && x < 26;
@@ -292,12 +654,5 @@ fn display_icon_data_url() -> Option<String> {
             img.put_pixel(x, y, c);
         }
     }
-    let mut out = Cursor::new(Vec::new());
-    let enc = PngEncoder::new(&mut out);
-    enc.write_image(img.as_raw(), size, size, ColorType::Rgba8.into())
-        .ok()?;
-    Some(format!(
-        "data:image/png;base64,{}",
-        STANDARD.encode(out.into_inner())
-    ))
+    rgba_to_data_url(&img)
 }

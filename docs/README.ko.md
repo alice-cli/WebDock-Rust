@@ -23,7 +23,9 @@ Swift [WebDock](https://github.com/alice-cli/WebDock) 의 크로스플랫폼 재
 | 화질 | 프리셋 + JPEG / PNG / H.264 |
 | H.264 | macOS: VideoToolbox · Win/Linux: OpenH264 |
 | 인증 | 선택 토큰 + WebSocket Origin 검사 |
-| macOS | 메뉴바 + 설정 창 (WebDock과 유사 UX) |
+| 데스크톱 GUI | **Windows / macOS / Linux** 공통 트레이 + 설정 창 |
+| 자동 업데이트 | GitHub Releases 확인 (설정 또는 `--check-update`) |
+| 앱 아이콘 | OS별 아이콘 (icns / Shell / FreeDesktop) |
 
 **보안:** LAN을 열면 토큰을 강하게 설정하세요.  
 **H.264 + LAN:** 브라우저는 HTTPS/localhost에서만 WebCodecs 지원 — 평문 `http://192.168…` 에서는 JPG를 쓰거나 TLS 프록시를 두세요.
@@ -35,8 +37,12 @@ Swift [WebDock](https://github.com/alice-cli/WebDock) 의 크로스플랫폼 재
 ### Releases
 
 1. [Releases](https://github.com/alice-cli/WebDock-Rust/releases)  
-2. OS별 아티팩트 다운로드 (mac zip/pkg · win zip · linux tar.gz)  
-3. 권한 허용 후 `http://127.0.0.1:8090`
+2. OS별 다운로드  
+   - **Windows:** `WebRust-Setup-*.exe` (설치파일 권장) 또는 portable zip  
+   - **macOS:** `WebRust-macOS-*.zip` → WebRust.app  
+   - **Linux:** `WebRust-linux-*.tar.gz` → `./WebRust` (트레이) 또는 `--cli`  
+3. 기본 실행은 GUI(트레이+설정). 원격 UI: `http://127.0.0.1:8090`  
+4. 업데이트: 설정 → 업데이트 확인, 또는 `WebRust --check-update`
 
 ### 소스 (macOS 앱 · 권장)
 

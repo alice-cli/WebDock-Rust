@@ -35,11 +35,28 @@ See [SIGNING.md](./SIGNING.md).
 
 ```powershell
 cargo build -p webdock-server --release
+# GUI (tray + settings):
+.\target\release\WebRust.exe
+# Headless:
 .\target\release\WebRust.exe --cli --port 8090
 ```
 
-Interactive desktop session required for capture.
+### Installer (Inno Setup)
+
+```powershell
+# Install Inno Setup 6, then:
+.\packaging\windows\build_installer.ps1 -Version 0.1.1
+# → dist\WebRust-Setup-0.1.1.exe  +  dist\WebRust-windows-0.1.1.zip
+```
+
+Interactive desktop session required for capture. GUI needs **WebView2** (preinstalled on modern Windows 10/11).
+
+## Auto-update
+
+`WebRust --check-update` queries GitHub Releases for `alice-cli/WebDock-Rust`.  
+Override repo with `WEBRUST_UPDATE_REPO=owner/name`.
 
 ## CI
 
-GitHub Actions: `macos-14`, `windows-latest`, `ubuntu-24.04`.
+GitHub Actions: `macos-14`, `windows-latest`, `ubuntu-24.04`  
+Release workflow publishes mac zip, Windows **Setup.exe** + zip, Linux tar.gz.

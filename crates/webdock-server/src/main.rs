@@ -1,6 +1,6 @@
 //! WebRust — remote desktop host.
 //!
-//! macOS default: **settings GUI + menu bar** (like Swift WebDock).  
+//! Default: **settings GUI + system tray** on macOS / Windows / Linux.  
 //! Headless: `WebRust --cli --port 8090`
 
 use std::fs::OpenOptions;
@@ -17,29 +17,61 @@ fn main() {
 
     if args.iter().any(|a| a == "-h" || a == "--help") {
         println!(
-            "WebRust — remote desktop host\n\n\
-             macOS (default): opens settings window + menu bar tray\n\
+            "WebRust — remote desktop host v{}\n\n\
+             Default: settings window + system tray (Win/macOS/Linux)\n\
              CLI:  WebRust --cli [--port N] [--lan] [--token T] [--webui DIR]\n\
-             Other: WebRust --gen-token"
+             Other:\n\
+               WebRust --gen-token\n\
+               WebRust --check-update\n\
+               WebRust --version",
+            env!("CARGO_PKG_VERSION")
         );
         return;
     }
 
-    init_tracing();
+    if args.iter().any(|a| a == "--version" || a == "-V") {
+        println!("WebRust {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
 
-    #[cfg(target_os = "macos")]
-    {
-        if !want_cli {
-            if let Err(e) = webdock_server::gui::run() {
-                eprintln!("GUI error: {e}");
+    if args.iter().any(|a| a == "--check-update") {
+        match webdock_server::updater::check_for_update() {
+            Ok(info) => {
+                println!("current: {}", info.current_version);
+                println!("latest:  {}", info.latest_version);
+                if info.update_available {
+                    println!("update:  AVAILABLE");
+                    if let Some(n) = &info.asset_name {
+                        println!("asset:   {n}");
+                    }
+                    if let Some(u) = &info.download_url {
+                        println!("download:{u}");
+                    }
+                    if let Some(u) = &info.html_url {
+                        println!("page:    {u}");
+                    }
+                    std::process::exit(0);
+                } else {
+                    println!("update:  up to date");
+                    std::process::exit(0);
+                }
+            }
+            Err(e) => {
+                eprintln!("check-update failed: {e}");
                 std::process::exit(1);
             }
-            return;
         }
     }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = want_cli; // always CLI on non-macOS
+
+    init_tracing();
+
+    if !want_cli {
+        if let Err(e) = webdock_server::gui::run() {
+            eprintln!("GUI error: {e}");
+            eprintln!("Hint: use headless mode: WebRust --cli --port 8090");
+            std::process::exit(1);
+        }
+        return;
     }
 
     if let Err(e) = run_cli(args) {
@@ -168,12 +200,23 @@ async fn run_cli(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
 
 fn discover_bundled_webui() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
-    let mac_os = exe.parent()?;
-    let contents = mac_os.parent()?;
-    let bundled = contents.join("Resources").join("webui");
-    if bundled.join("index.html").is_file() {
-        Some(bundled)
-    } else {
-        None
+    let exe_dir = exe.parent()?;
+
+    if let Some(contents) = exe_dir.parent() {
+        let bundled = contents.join("Resources").join("webui");
+        if bundled.join("index.html").is_file() {
+            return Some(bundled);
+        }
     }
+    let beside = exe_dir.join("webui");
+    if beside.join("index.html").is_file() {
+        return Some(beside);
+    }
+    for rel in ["webui", "../webui", "../../webui"] {
+        let p = PathBuf::from(rel);
+        if p.join("index.html").is_file() {
+            return Some(p);
+        }
+    }
+    None
 }

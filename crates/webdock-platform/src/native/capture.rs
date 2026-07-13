@@ -110,8 +110,8 @@ impl CaptureBackend for NativeCapture {
                     if title.is_empty() && (name.is_empty() || name == "?") {
                         continue;
                     }
-                    // System chrome (Dock, Wallpaper, …) — same blocklist as Swift WebDock.
-                    if is_system_app(&name) {
+                    // System chrome (Dock, Wallpaper, Explorer shell, panels, …).
+                    if is_system_app(&name) || is_system_window(&name, &title) {
                         continue;
                     }
                     let pid = w.pid().unwrap_or(0) as i32;
@@ -454,32 +454,197 @@ fn route_from_target(target: CaptureTarget) -> RouteId {
     }
 }
 
-/// Matches Swift `CaptureManager.systemAppBlocklist`.
+/// Filter system chrome (Dock, Explorer shell, desktop panels, …) across OS.
 fn is_system_app(name: &str) -> bool {
-    matches!(
-        name,
-        "Dock"
-            | "Window Server"
-            | "WindowServer"
-            | "Wallpaper"
-            | "WallpaperAgent"
-            | "Control Center"
-            | "Notification Center"
-            | "Spotlight"
-            | "WindowManager"
-            | "Menubar"
-            | "Menu Bar"
-            | "Screenshot"
-            | "coreautha"
-            | "universalaccessd"
-            | "SystemUIServer"
-            | "ControlStrip"
-            | "loginwindow"
-            | "UserNotificationCenter"
-            | "TextInputMenuAgent"
-            | "TextInputSwitcher"
-            | "WebRust"
-    ) || name.eq_ignore_ascii_case("Dock")
+    let n = name.trim();
+    if n.is_empty() {
+        return true;
+    }
+    // Always hide ourselves.
+    if n.eq_ignore_ascii_case("WebRust") || n.eq_ignore_ascii_case("webdock-server") {
+        return true;
+    }
+
+    // ── macOS (Swift WebDock blocklist + extras) ────────────────────────
+    const MAC: &[&str] = &[
+        "Dock",
+        "Window Server",
+        "WindowServer",
+        "Wallpaper",
+        "WallpaperAgent",
+        "Control Center",
+        "Notification Center",
+        "Spotlight",
+        "WindowManager",
+        "Menubar",
+        "Menu Bar",
+        "Screenshot",
+        "coreautha",
+        "universalaccessd",
+        "SystemUIServer",
+        "ControlStrip",
+        "loginwindow",
+        "UserNotificationCenter",
+        "TextInputMenuAgent",
+        "TextInputSwitcher",
+        "Finder", // desktop surface only listed when it has real windows; keep when titled
+        "Siri",
+        "ControlCentre",
+        "NotificationCenter",
+        "AirPlayUIAgent",
+        "DockHelper",
+        "WiFiAgent",
+        "BatteryUIAgent",
+        "System Settings",
+        "System Preferences",
+    ];
+    // Finder with a real document title is useful — only drop untitled desktop chrome.
+    // (Handled below after title-less checks in list; here exact-name Dock-class apps.)
+
+    // ── Windows shell chrome (not File Explorer document windows) ───────
+    const WIN: &[&str] = &[
+        "ShellExperienceHost",
+        "StartMenuExperienceHost",
+        "SearchApp",
+        "SearchHost",
+        "SearchUI",
+        "SearchIndexer",
+        "ApplicationFrameHost",
+        "SystemSettings",
+        "TextInputHost",
+        "LockApp",
+        "LogonUI",
+        "dwm",
+        "DesktopWindowManager",
+        "RuntimeBroker",
+        "BackgroundTaskHost",
+        "SecurityHealthSystray",
+        "Widgets",
+        "WidgetService",
+        "PhoneExperienceHost",
+        "CrossDeviceResume",
+        "GameBar",
+        "GameBarFTServer",
+        "NVIDIA Share",
+        "NVIDIA GeForce Overlay",
+        "Windows Shell Experience Host",
+        "Microsoft Text Input Application",
+        "Program Manager",
+        "Windows Input Experience",
+        "ctfmon",
+        "sihost",
+        "fontdrvhost",
+        "conhost",
+    ];
+
+    // ── Linux desktop shells / panels ───────────────────────────────────
+    const LINUX: &[&str] = &[
+        "gnome-shell",
+        "GNOME Shell",
+        "plasmashell",
+        "Plasma",
+        "kwin",
+        "kwin_x11",
+        "kwin_wayland",
+        "xfce4-panel",
+        "xfdesktop",
+        "lxpanel",
+        "lxqt-panel",
+        "mate-panel",
+        "cinnamon",
+        "budgie-panel",
+        "plank",
+        "docky",
+        "cairo-dock",
+        "latte-dock",
+        "polybar",
+        "waybar",
+        "i3bar",
+        "swaybar",
+        "nwg-dock",
+        "fusuma",
+        "xdg-desktop-portal",
+        "xdg-desktop-portal-gtk",
+        "xdg-desktop-portal-gnome",
+        "xdg-desktop-portal-kde",
+        "gsd-xsettings",
+        "gsd-media-keys",
+        "evolution-alarm-notify",
+        "update-notifier",
+        "system-config-printer-applet",
+    ];
+
+    for list in [MAC, WIN, LINUX] {
+        for &blocked in list {
+            if n.eq_ignore_ascii_case(blocked) {
+                // Finder: only filter when it is pure desktop chrome (empty-ish);
+                // keep normal Finder windows — those have titles like folder names.
+                if n.eq_ignore_ascii_case("Finder") {
+                    continue; // let title filter handle empty Finder if needed
+                }
+                return true;
+            }
+        }
+    }
+
+    // Substring / process-style patterns (case-insensitive)
+    let lower = n.to_ascii_lowercase();
+    const SUB: &[&str] = &[
+        "shellexperience",
+        "startmenuexperience",
+        "textinputhost",
+        "windowsshell",
+        "nvidia share",
+        "geforce overlay",
+        "xdock",
+        "gnome-shell",
+        "plasmashell",
+    ];
+    for s in SUB {
+        if lower.contains(s) {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Extra window-level filters (title + app) for shell desktops / empty chrome.
+fn is_system_window(app: &str, title: &str) -> bool {
+    let app_l = app.to_ascii_lowercase();
+    let title_l = title.trim().to_ascii_lowercase();
+
+    // Windows: desktop / Program Manager hosted by explorer.exe
+    if app_l == "explorer" || app_l == "windows explorer" {
+        if title_l.is_empty()
+            || title_l == "program manager"
+            || title_l == "desktop"
+            || title_l.starts_with("program manager")
+        {
+            return true;
+        }
+    }
+
+    // macOS Dock / menu extras sometimes surface odd titles
+    if app_l == "dock" || app_l == "systemuiserver" || app_l == "control center" {
+        return true;
+    }
+
+    // Linux: desktop / panel windows with no useful title
+    if matches!(
+        app_l.as_str(),
+        "nautilus" | "dolphin" | "nemo" | "thunar" | "pcmanfm"
+    ) && (title_l.is_empty() || title_l == "desktop" || title_l == "x-nautilus-desktop")
+    {
+        return true;
+    }
+
+    // Generic: zero-size-like titles used by overlay hosts
+    if title_l == "msctfime ui" || title_l == "default ime" || title_l == "gdi+ window" {
+        return true;
+    }
+
+    false
 }
 
 fn capture_rgba(target: CaptureTarget, max_width: u32) -> Result<image::RgbaImage, CaptureError> {

@@ -8,10 +8,10 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 
-#[cfg(target_os = "macos")]
-use tracing::{info, warn};
 #[cfg(not(target_os = "macos"))]
 use tracing::info;
+#[cfg(target_os = "macos")]
+use tracing::{info, warn};
 
 use crate::traits::*;
 

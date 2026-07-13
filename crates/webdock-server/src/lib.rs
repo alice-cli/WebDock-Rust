@@ -6,6 +6,8 @@ mod host;
 mod peer;
 mod state;
 mod static_files;
+pub mod updater;
+pub mod util;
 
 pub mod gui;
 pub use host::{Host, SharedHost};

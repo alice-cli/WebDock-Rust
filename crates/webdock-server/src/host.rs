@@ -8,6 +8,7 @@ use tracing::{info, warn};
 use webdock_core::AppConfig;
 use webdock_platform;
 
+use crate::updater::UpdateInfo;
 use crate::{lan_addresses, start, ServerHandle, ServerOptions};
 
 /// Owns config and the running remote-desktop server.
@@ -16,6 +17,7 @@ pub struct Host {
     config: Mutex<AppConfig>,
     handle: Mutex<Option<ServerHandle>>,
     webui_dir: Option<PathBuf>,
+    update: Mutex<Option<UpdateInfo>>,
 }
 
 impl Host {
@@ -31,7 +33,16 @@ impl Host {
             config: Mutex::new(config),
             handle: Mutex::new(None),
             webui_dir,
+            update: Mutex::new(None),
         })
+    }
+
+    pub fn set_update_info(&self, info: Option<UpdateInfo>) {
+        *self.update.lock() = info;
+    }
+
+    pub fn update_info(&self) -> Option<UpdateInfo> {
+        self.update.lock().clone()
     }
 
     pub fn config(&self) -> AppConfig {
@@ -67,6 +78,7 @@ impl Host {
                 }
             }
         }
+        let update = self.update.lock().clone();
         serde_json::json!({
             "running": running,
             "port": port,
@@ -79,6 +91,8 @@ impl Host {
             "allowedIps": cfg.allowed_ips,
             "urls": urls,
             "configPath": AppConfig::config_path().display().to_string(),
+            "version": env!("CARGO_PKG_VERSION"),
+            "update": update,
         })
     }
 
@@ -227,7 +241,7 @@ impl Host {
         } else {
             format!("http://127.0.0.1:{port}/")
         };
-        let _ = std::process::Command::new("open").arg(&url).spawn();
+        crate::util::open_url(&url);
     }
 }
 

@@ -27,7 +27,9 @@ Separate app identity → Screen Recording / Accessibility do not collide with W
 | H.264 | **macOS:** VideoToolbox HW · **Win/Linux:** OpenH264 SW |
 | Auth | Optional access token (+ Origin check for WebSocket) |
 | LAN | Connect from other devices (use a **strong token**) |
-| macOS shell | Menu bar + settings window (like WebDock) |
+| Desktop GUI | Tray + settings on **Windows / macOS / Linux** |
+| Auto-update | GitHub Releases check (`--check-update` / Settings) |
+| App icons | Platform icons (icns / Shell / FreeDesktop) |
 
 **Security:** If LAN is enabled, set a strong token. Do not expose the port to the public internet unprotected.  
 **H.264 over LAN:** browsers require **HTTPS or localhost** for WebCodecs — use JPG on plain `http://192.168.x.x`, or put a TLS reverse proxy in front.
@@ -57,11 +59,12 @@ Separate app identity → Screen Recording / Accessibility do not collide with W
 
 1. Open [**Releases**](https://github.com/alice-cli/WebDock-Rust/releases)
 2. Download for your OS:
-   - **macOS:** `WebRust-macOS-*.zip` or `WebRust-macOS-*.pkg`
-   - **Windows:** `WebRust-windows-*.zip`
-   - **Linux:** `WebRust-linux-*.tar.gz`
+   - **macOS:** `WebRust-macOS-*.zip` → open **WebRust.app**
+   - **Windows:** `WebRust-Setup-*.exe` (installer, recommended) or portable zip
+   - **Linux:** `WebRust-linux-*.tar.gz` → run `./WebRust` (tray) or `--cli`
 3. Grant host permissions (macOS: Screen Recording + Accessibility)
-4. Start server → browser `http://127.0.0.1:8090`
+4. Default GUI starts the tray + settings; remote UI at `http://127.0.0.1:8090`
+5. Updates: Settings → **Check for updates**, or `WebRust --check-update`
 
 ### From source (macOS app — recommended)
 

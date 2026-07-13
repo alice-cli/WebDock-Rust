@@ -1,8 +1,8 @@
 //! Raise / close / bounds for target windows.
 
-use tracing::{debug, warn};
 #[cfg(target_os = "macos")]
 use tracing::info;
+use tracing::{debug, warn};
 
 use super::capture::{bounds_for_route, find_window, pid_for_route};
 use crate::route::{is_display_route, window_id_from_route};

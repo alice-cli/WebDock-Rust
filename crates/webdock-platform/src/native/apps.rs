@@ -322,11 +322,13 @@ fn collect_lnk(dir: &Path, out: &mut Vec<AppInfo>, depth: u32) {
                 .and_then(|s| s.to_str())
                 .unwrap_or("App")
                 .to_string();
+            let path_s = p.to_string_lossy().into_owned();
+            let icon = super::icons::data_url_for_key(&path_s);
             out.push(AppInfo {
                 name,
-                path: p.to_string_lossy().into_owned(),
-                icon: None,
-                icon_key: Some(p.to_string_lossy().into_owned()),
+                path: path_s.clone(),
+                icon,
+                icon_key: Some(path_s),
             });
         }
     }
@@ -363,11 +365,13 @@ fn list_linux_apps() -> Result<Vec<AppInfo>, PlatformError> {
                     .unwrap_or("App")
                     .to_string()
             });
+            let path_s = p.to_string_lossy().into_owned();
+            let icon = super::icons::data_url_for_key(&path_s);
             apps.push(AppInfo {
                 name,
-                path: p.to_string_lossy().into_owned(),
-                icon: None,
-                icon_key: Some(p.to_string_lossy().into_owned()),
+                path: path_s.clone(),
+                icon,
+                icon_key: Some(path_s),
             });
         }
     }

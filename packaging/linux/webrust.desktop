@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=WebRust
+Comment=Remote desktop host (WebDock-Rust)
+Exec=WebRust
+Icon=webrust
+Terminal=false
+Categories=Network;Utility;
+StartupNotify=true

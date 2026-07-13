@@ -1,13 +1,13 @@
 <!doctype html>
-<html lang="ko">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>WebRust 설정</title>
+  <title>WebRust Settings</title>
   <style>
-    :root { color-scheme: dark; --bg:#0a0b0d; --card:#14161a; --line:#2a2e36; --text:#e8eef6; --muted:#9aa3b2; --blue:#3b82f6; --green:#22c55e; --red:#ef4444; }
+    :root { color-scheme: dark; --bg:#0a0b0d; --card:#14161a; --line:#2a2e36; --text:#e8eef6; --muted:#9aa3b2; --blue:#3b82f6; --green:#22c55e; --red:#ef4444; --amber:#f59e0b; }
     * { box-sizing: border-box; }
-    body { margin:0; font:13px/1.45 -apple-system, system-ui, sans-serif; background:var(--bg); color:var(--text); }
+    body { margin:0; font:13px/1.45 -apple-system, system-ui, "Segoe UI", sans-serif; background:var(--bg); color:var(--text); }
     .wrap { padding:18px 18px 28px; max-width:520px; margin:0 auto; }
     h1 { font-size:16px; font-weight:650; margin:0 0 4px; }
     .sub { color:var(--muted); font-size:12px; margin:0 0 16px; }
@@ -19,7 +19,7 @@
       flex:1; min-width:120px; background:#0a0b0d; border:1px solid var(--line); color:var(--text);
       border-radius:8px; padding:8px 10px; font:inherit;
     }
-    textarea { width:100%; min-height:64px; resize:vertical; font-family:ui-monospace,Menlo,monospace; font-size:12px; }
+    textarea { width:100%; min-height:64px; resize:vertical; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; }
     .switch { position:relative; width:42px; height:24px; flex:0 0 auto; }
     .switch input { opacity:0; width:0; height:0; }
     .slider { position:absolute; inset:0; background:#3a3f4a; border-radius:999px; cursor:pointer; transition:.15s; }
@@ -29,7 +29,7 @@
     .status { font-size:12px; color:var(--muted); }
     .status.on { color:var(--green); }
     .status.off { color:var(--muted); }
-    .urls { font-family:ui-monospace,Menlo,monospace; font-size:11px; color:#c5d0e0; white-space:pre-wrap; word-break:break-all;
+    .urls { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:11px; color:#c5d0e0; white-space:pre-wrap; word-break:break-all;
       background:#0a0b0d; border:1px solid var(--line); border-radius:8px; padding:10px; min-height:48px; }
     .btns { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
     button {
@@ -42,68 +42,85 @@
     button:disabled { opacity:.45; cursor:default; }
     .hint { font-size:11px; color:var(--muted); margin-top:6px; }
     .check { display:flex; align-items:center; gap:8px; margin:6px 0; }
+    .badge { display:inline-block; font-size:11px; padding:2px 8px; border-radius:999px; background:#1e293b; color:#93c5fd; }
+    .badge.warn { background:#422006; color:#fcd34d; }
+    .badge.ok { background:#052e16; color:#86efac; }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>WebRust 설정</h1>
-    <p class="sub">원본 WebDock과 같은 역할 · 메뉴바에서도 열 수 있습니다</p>
+    <h1>WebRust Settings</h1>
+    <p class="sub">Remote desktop host · same UI on Windows, macOS, and Linux</p>
 
     <section>
-      <div class="sec-title">서버</div>
+      <div class="sec-title">Server</div>
       <div class="row">
-        <span>서버</span>
+        <span>Server</span>
         <label class="switch"><input type="checkbox" id="serverEnabled" /><span class="slider"></span></label>
-        <span class="status" id="runStatus">○ 꺼짐</span>
+        <span class="status" id="runStatus">○ Off</span>
       </div>
       <div class="row">
-        <label class="lbl">포트</label>
+        <label class="lbl">Port</label>
         <input type="number" id="port" min="1" max="65535" value="8090" />
       </div>
       <div class="check">
         <input type="checkbox" id="allowLan" />
-        <label for="allowLan">외부 접근 허용 (LAN)</label>
+        <label for="allowLan">Allow LAN access</label>
       </div>
       <div class="btns">
-        <button type="button" class="primary" id="btnApply">저장 / 적용</button>
-        <button type="button" id="btnOpen">브라우저에서 원격 열기</button>
+        <button type="button" class="primary" id="btnApply">Save / Apply</button>
+        <button type="button" id="btnOpen">Open remote in browser</button>
       </div>
       <p class="hint" id="hint"></p>
     </section>
 
     <section>
-      <div class="sec-title">접속 URL</div>
+      <div class="sec-title">Connection URLs</div>
       <div class="urls" id="urls">—</div>
     </section>
 
     <section>
-      <div class="sec-title">토큰</div>
+      <div class="sec-title">Token</div>
       <div class="row">
-        <input type="text" id="token" placeholder="비우면 인증 없음" spellcheck="false" />
-        <button type="button" id="btnGen">생성</button>
+        <input type="text" id="token" placeholder="Empty = no auth" spellcheck="false" />
+        <button type="button" id="btnGen">Generate</button>
       </div>
-      <p class="hint">토큰이 있으면 브라우저·WS에 필요합니다. URL에 ?token= 이 붙습니다.</p>
+      <p class="hint">When set, the browser and WebSocket need the token (?token= in the URL).</p>
     </section>
 
     <section>
-      <div class="sec-title">도메인 허용 목록 (한 줄에 하나)</div>
+      <div class="sec-title">Allowed domains (one per line)</div>
       <textarea id="domains" placeholder="example.com&#10;*.elice.pro"></textarea>
     </section>
 
     <section>
-      <div class="sec-title">IP 허용 목록</div>
+      <div class="sec-title">IP allowlist</div>
       <div class="check">
         <input type="checkbox" id="ipAllowlistEnabled" />
-        <label for="ipAllowlistEnabled">IP 허용 목록 사용</label>
+        <label for="ipAllowlistEnabled">Enable IP allowlist</label>
       </div>
       <textarea id="ips" placeholder="192.168.0.10"></textarea>
     </section>
 
     <section>
-      <div class="sec-title">시스템</div>
+      <div class="sec-title">Updates</div>
+      <div class="row">
+        <span>Version</span>
+        <span class="badge" id="verBadge">—</span>
+        <span id="updBadge" class="badge ok" style="display:none">Up to date</span>
+      </div>
+      <p class="hint" id="updHint">Checks GitHub Releases (alice-cli/WebDock-Rust).</p>
+      <div class="btns">
+        <button type="button" id="btnCheckUpd">Check for updates</button>
+        <button type="button" class="primary" id="btnOpenUpd" style="display:none">Download update</button>
+      </div>
+    </section>
+
+    <section>
+      <div class="sec-title">System</div>
       <p class="hint" id="configPath"></p>
       <div class="btns">
-        <button type="button" class="danger" id="btnQuit">WebRust 종료</button>
+        <button type="button" class="danger" id="btnQuit">Quit WebRust</button>
       </div>
     </section>
   </div>
@@ -114,8 +131,6 @@
       const payload = JSON.stringify({ cmd, ...extra });
       if (window.ipc && window.ipc.postMessage) {
         window.ipc.postMessage(payload);
-      } else if (window.__TAURI_INTERNALS__) {
-        // noop
       } else {
         console.warn('no ipc', payload);
       }
@@ -136,19 +151,39 @@
       $('ips').value = (s.allowedIps || []).join('\n');
       const running = !!s.running;
       const st = $('runStatus');
-      st.textContent = running ? '● 실행 중' : '○ 꺼짐';
+      st.textContent = running ? '● Running' : '○ Off';
       st.className = 'status ' + (running ? 'on' : 'off');
       const urls = s.urls || [];
       if (urls.length === 0) {
-        $('urls').textContent = running ? '—' : '서버를 켜면 URL이 표시됩니다';
+        $('urls').textContent = running ? '—' : 'Start the server to see URLs';
       } else {
         $('urls').textContent = urls.map(u => {
           if (s.hasToken && s.token) return u + '/?token=' + s.token;
           return u;
         }).join('\n');
       }
-      $('configPath').textContent = '설정 파일: ' + (s.configPath || '');
+      $('configPath').textContent = 'Config: ' + (s.configPath || '');
       $('hint').textContent = s.message || '';
+
+      // Version / update
+      const ver = s.version || '';
+      $('verBadge').textContent = ver ? ('v' + ver) : '—';
+      const upd = s.update;
+      const badge = $('updBadge');
+      const btnOpen = $('btnOpenUpd');
+      if (upd && upd.updateAvailable) {
+        badge.style.display = '';
+        badge.className = 'badge warn';
+        badge.textContent = 'v' + upd.latestVersion + ' available';
+        btnOpen.style.display = '';
+        $('updHint').textContent = (upd.assetName ? ('Asset: ' + upd.assetName + ' · ') : '')
+          + 'GitHub Releases auto-check';
+      } else if (upd) {
+        badge.style.display = '';
+        badge.className = 'badge ok';
+        badge.textContent = 'Up to date';
+        btnOpen.style.display = 'none';
+      }
     }
 
     window.__onHost = applyState;
@@ -167,8 +202,9 @@
     $('btnGen').onclick = () => send('genToken');
     $('btnOpen').onclick = () => send('openRemote');
     $('btnQuit').onclick = () => send('quit');
+    $('btnCheckUpd').onclick = () => send('checkUpdate');
+    $('btnOpenUpd').onclick = () => send('openUpdate');
     $('serverEnabled').onchange = () => {
-      // Quick toggle: apply immediately like original NSSwitch
       send('set', {
         serverEnabled: $('serverEnabled').checked,
         port: parseInt($('port').value, 10) || 8090,
@@ -180,7 +216,6 @@
       });
     };
 
-    // Initial load
     send('get');
     setInterval(() => send('get'), 3000);
   </script>
