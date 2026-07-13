@@ -13,7 +13,7 @@ use webdock_server::{lan_addresses, start, ServerOptions};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let cli = args.iter().any(|a| a == "--cli" || a == "--headless");
+    let want_cli = args.iter().any(|a| a == "--cli" || a == "--headless");
 
     if args.iter().any(|a| a == "-h" || a == "--help") {
         println!(
@@ -29,13 +29,17 @@ fn main() {
 
     #[cfg(target_os = "macos")]
     {
-        if !cli {
+        if !want_cli {
             if let Err(e) = webdock_server::gui::run() {
                 eprintln!("GUI error: {e}");
                 std::process::exit(1);
             }
             return;
         }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = want_cli; // always CLI on non-macOS
     }
 
     if let Err(e) = run_cli(args) {

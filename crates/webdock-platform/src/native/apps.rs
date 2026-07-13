@@ -192,6 +192,7 @@ fn is_under_search_dirs(path: &Path) -> bool {
     }
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 fn path_under(path: &Path, dir: &Path) -> bool {
     let Ok(p) = path
         .canonicalize()

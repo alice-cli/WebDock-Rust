@@ -11,6 +11,7 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use image::codecs::png::PngEncoder;
 use image::{ColorType, ImageBuffer, ImageEncoder};
 use parking_lot::Mutex;
+#[cfg(target_os = "macos")]
 use tracing::debug;
 
 static CACHE: OnceLock<Mutex<HashMap<String, Option<String>>>> = OnceLock::new();

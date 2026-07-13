@@ -17,7 +17,7 @@ sudo apt-get install -y \
   pkg-config libssl-dev libclang-dev clang \
   libpipewire-0.3-dev libspa-0.2-dev \
   libxcb1-dev libxrandr-dev libdbus-1-dev \
-  libwayland-dev libegl-dev \
+  libwayland-dev libegl-dev libgbm-dev \
   libwebkit2gtk-4.1-dev   # only if building tray/WebView extras
 ```
 

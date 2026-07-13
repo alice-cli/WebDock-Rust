@@ -26,8 +26,6 @@ struct StreamCtrl {
     force_key: Arc<AtomicBool>,
     /// Live H.264 target bitrate (bps); encoder recreated when this changes.
     bitrate: Arc<AtomicU32>,
-    /// Unix-ms of last encoder recreate (debounce adaptive bitrate thrash).
-    last_reconfig_ms: Arc<AtomicU64>,
 }
 
 pub struct NativeCapture {
@@ -191,6 +189,7 @@ impl CaptureBackend for NativeCapture {
         let cancel = Arc::new(AtomicBool::new(false));
         let force_key = Arc::new(AtomicBool::new(true));
         let bitrate_live = Arc::new(AtomicU32::new(cfg.bitrate_bps.max(400_000)));
+        // Debounce adaptive bitrate thrash (local to capture loop).
         let last_reconfig_ms = Arc::new(AtomicU64::new(0));
         self.active.lock().insert(
             route.as_i64(),
@@ -198,7 +197,6 @@ impl CaptureBackend for NativeCapture {
                 cancel: cancel.clone(),
                 force_key: force_key.clone(),
                 bitrate: bitrate_live.clone(),
-                last_reconfig_ms: last_reconfig_ms.clone(),
             },
         );
 
@@ -531,7 +529,7 @@ fn encode_png(img: &image::RgbaImage) -> Result<(u32, u32, Vec<u8>), CaptureErro
     let (w, h) = img.dimensions();
     let mut buf = Cursor::new(Vec::with_capacity((w * h) as usize / 2));
     {
-        let mut encoder = image::codecs::png::PngEncoder::new(&mut buf);
+        let encoder = image::codecs::png::PngEncoder::new(&mut buf);
         encoder
             .write_image(img.as_raw(), w, h, ColorType::Rgba8.into())
             .map_err(|e| CaptureError::Other(e.to_string()))?;

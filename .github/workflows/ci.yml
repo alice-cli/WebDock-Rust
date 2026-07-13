@@ -50,8 +50,8 @@ jobs:
             libxrandr-dev \
             libdbus-1-dev \
             libwayland-dev \
-            libegl-dev
-
+            libegl-dev \
+            libgbm-dev
       - name: Format check
         run: cargo fmt --all -- --check
 

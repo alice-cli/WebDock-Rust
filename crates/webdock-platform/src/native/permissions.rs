@@ -1,6 +1,9 @@
 //! Host permission diagnostics for real capture/input.
 
+#[cfg(target_os = "macos")]
 use tracing::{info, warn};
+#[cfg(not(target_os = "macos"))]
+use tracing::info;
 
 /// Log what the OS requires for production use.
 pub fn log_requirements() {

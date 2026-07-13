@@ -50,7 +50,7 @@ jobs:
             libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
             libpipewire-0.3-dev libspa-0.2-dev \
             libclang-dev clang \
-            libxcb1-dev libxrandr-dev libdbus-1-dev libwayland-dev libegl-dev
+            libxcb1-dev libxrandr-dev libdbus-1-dev libwayland-dev libegl-dev libgbm-dev
       - name: Build
         run: cargo build -p webdock-server --release
       - name: Package

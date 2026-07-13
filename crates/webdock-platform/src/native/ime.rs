@@ -39,8 +39,7 @@ impl ImeControl for NativeIme {
             "window-list".into(),
             "display-list".into(),
         ];
-        #[cfg(target_os = "macos")]
-        {
+        if cfg!(target_os = "macos") {
             caps.push("ime-korean".into());
         }
         caps

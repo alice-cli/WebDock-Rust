@@ -1,9 +1,10 @@
 //! Raise / close / bounds for target windows.
 
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
+#[cfg(target_os = "macos")]
+use tracing::info;
 
 use super::capture::{bounds_for_route, find_window, pid_for_route};
-use super::icons::path_for_pid;
 use crate::route::{is_display_route, window_id_from_route};
 use crate::traits::*;
 use crate::types::*;
@@ -283,7 +284,6 @@ end tell"#,
     let _ = std::process::Command::new("osascript")
         .args(["-e", &script])
         .status();
-    let _ = path_for_pid; // keep import used if needed later
     Ok(())
 }
 
