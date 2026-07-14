@@ -122,7 +122,6 @@ async fn run_cli(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
 
     let mut webui_dir: Option<PathBuf> = None;
     let mut i = 0;
-    let mut port_forced = false;
     while i < args.len() {
         match args[i].as_str() {
             "--cli" | "--headless" => {}
@@ -130,7 +129,6 @@ async fn run_cli(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 i += 1;
                 if let Some(p) = args.get(i) {
                     cfg.port = p.parse()?;
-                    port_forced = true;
                 }
             }
             "--lan" => cfg.allow_lan = true,
@@ -162,43 +160,26 @@ async fn run_cli(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         webui_dir = discover_bundled_webui();
     }
 
-    let ports: Vec<u16> = if port_forced {
-        vec![cfg.port]
-    } else {
-        let mut v = vec![cfg.port];
-        for p in 8090u16..=8100 {
-            if !v.contains(&p) {
-                v.push(p);
-            }
+    // Always use the configured / --port value. Do not auto-pick 8090–8100 and
+    // rewrite config.json — that undid intentional port changes.
+    let port = cfg.port.max(1);
+    cfg.port = port;
+    let handle = match start(ServerOptions {
+        config: cfg.clone(),
+        webui_dir: webui_dir.clone(),
+        platform: webdock_platform::current(),
+    })
+    .await
+    {
+        Ok(h) => h,
+        Err(e) => {
+            return Err(format!(
+                "port {port} is unavailable ({e}). Use --port N to pick another."
+            )
+            .into());
         }
-        v
     };
 
-    let mut handle = None;
-    let mut last_err = None;
-    for port in ports {
-        cfg.port = port;
-        match start(ServerOptions {
-            config: cfg.clone(),
-            webui_dir: webui_dir.clone(),
-            platform: webdock_platform::current(),
-        })
-        .await
-        {
-            Ok(h) => {
-                handle = Some(h);
-                break;
-            }
-            Err(e) => last_err = Some(e),
-        }
-    }
-    let handle = handle.ok_or_else(|| {
-        last_err
-            .map(|e| e.to_string())
-            .unwrap_or_else(|| "bind failed".into())
-    })?;
-
-    cfg.port = handle.local_addr.port();
     let _ = cfg.save();
 
     for u in cfg.connection_urls(&lan_addresses()) {

@@ -65,11 +65,14 @@ impl Host {
     pub fn status_json(&self) -> serde_json::Value {
         let cfg = self.config();
         let running = self.is_running();
-        let port = self.local_port().unwrap_or(cfg.port);
+        // Always report the *configured* port so the settings UI never reverts
+        // the user's choice to a temporary bind / fallback port.
+        let configured_port = cfg.port;
+        let bound_port = self.local_port();
         let mut urls = cfg.connection_urls(&lan_addresses());
-        // If bound port differs (fallback), rewrite.
-        if let Some(p) = self.local_port() {
-            if p != cfg.port {
+        // If bound port differs from config (session fallback), rewrite URLs only.
+        if let Some(p) = bound_port {
+            if p != configured_port {
                 urls = vec![format!("http://127.0.0.1:{p}")];
                 if cfg.allow_lan {
                     for ip in lan_addresses() {
@@ -81,7 +84,8 @@ impl Host {
         let update = self.update.lock().clone();
         serde_json::json!({
             "running": running,
-            "port": port,
+            "port": configured_port,
+            "boundPort": bound_port,
             "serverEnabled": cfg.server_enabled,
             "allowLan": cfg.allow_lan,
             "token": cfg.token,
@@ -121,8 +125,11 @@ impl Host {
                 || cfg.ip_allowlist_enabled != ip_allowlist_enabled
                 || cfg.allowed_ips != allowed_ips);
 
+        if port == 0 {
+            return Err("port must be between 1 and 65535".into());
+        }
         cfg.server_enabled = server_enabled;
-        cfg.port = port.max(1);
+        cfg.port = port;
         cfg.allow_lan = allow_lan;
         cfg.token = token;
         cfg.allowed_domains = allowed_domains;
@@ -149,52 +156,35 @@ impl Host {
         }
         let cfg = self.config();
         let webui = self.webui_dir.clone();
-        let ports: Vec<u16> = {
-            let mut v = vec![cfg.port];
-            for p in 8090u16..=8100 {
-                if !v.contains(&p) {
-                    v.push(p);
-                }
+        // Bind only to the user-configured port. Never auto-fallback and rewrite
+        // config.json — that made port changes appear to "snap back" in the UI.
+        let port = cfg.port.max(1);
+        let mut c = cfg.clone();
+        c.port = port;
+        c.server_enabled = true;
+        match self.rt.block_on(start(ServerOptions {
+            config: c,
+            webui_dir: webui,
+            platform: webdock_platform::current(),
+        })) {
+            Ok(h) => {
+                let addr = h.local_addr;
+                let mut saved = self.config();
+                saved.server_enabled = true;
+                saved.port = port;
+                let _ = saved.save();
+                *self.config.lock() = saved;
+                *self.handle.lock() = Some(h);
+                info!(%addr, "server started");
+                Ok(addr)
             }
-            v
-        };
-
-        let mut last = None;
-        for port in ports {
-            let mut c = cfg.clone();
-            c.port = port;
-            c.server_enabled = true;
-            match self.rt.block_on(start(ServerOptions {
-                config: c.clone(),
-                webui_dir: webui.clone(),
-                platform: webdock_platform::current(),
-            })) {
-                Ok(h) => {
-                    let addr = h.local_addr;
-                    if addr.port() != cfg.port {
-                        let mut saved = c;
-                        saved.port = addr.port();
-                        let _ = saved.save();
-                        *self.config.lock() = saved;
-                    } else {
-                        let mut saved = self.config();
-                        saved.server_enabled = true;
-                        let _ = saved.save();
-                        *self.config.lock() = saved;
-                    }
-                    *self.handle.lock() = Some(h);
-                    info!(%addr, "server started");
-                    return Ok(addr);
-                }
-                Err(e) => {
-                    warn!(port, error = %e, "bind failed");
-                    last = Some(e);
-                }
+            Err(e) => {
+                warn!(port, error = %e, "bind failed");
+                Err(format!(
+                    "port {port} is unavailable ({e}). Choose another port in Settings and Apply."
+                ))
             }
         }
-        Err(last
-            .map(|e| e.to_string())
-            .unwrap_or_else(|| "bind failed".into()))
     }
 
     pub fn stop(&self) {
