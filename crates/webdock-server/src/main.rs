@@ -173,10 +173,9 @@ async fn run_cli(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     {
         Ok(h) => h,
         Err(e) => {
-            return Err(format!(
-                "port {port} is unavailable ({e}). Use --port N to pick another."
-            )
-            .into());
+            return Err(
+                format!("port {port} is unavailable ({e}). Use --port N to pick another.").into(),
+            );
         }
     };
 
