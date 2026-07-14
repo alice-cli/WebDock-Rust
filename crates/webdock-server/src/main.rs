@@ -160,10 +160,11 @@ async fn run_cli(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         webui_dir = discover_bundled_webui();
     }
 
-    // Always use the configured / --port value. Do not auto-pick 8090–8100 and
-    // rewrite config.json — that undid intentional port changes.
-    let port = cfg.port.max(1);
-    cfg.port = port;
+    // Exact configured / --port only. No port scanning or config rewrite.
+    let port = cfg.port;
+    if port == 0 {
+        return Err("port must be between 1 and 65535".into());
+    }
     let handle = match start(ServerOptions {
         config: cfg.clone(),
         webui_dir: webui_dir.clone(),
@@ -179,6 +180,7 @@ async fn run_cli(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
+    // Persist only when CLI mutated config (e.g. --lan / --token); keep user's port.
     let _ = cfg.save();
 
     for u in cfg.connection_urls(&lan_addresses()) {

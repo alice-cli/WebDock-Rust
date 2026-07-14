@@ -65,27 +65,19 @@ impl Host {
     pub fn status_json(&self) -> serde_json::Value {
         let cfg = self.config();
         let running = self.is_running();
-        // Always report the *configured* port so the settings UI never reverts
-        // the user's choice to a temporary bind / fallback port.
-        let configured_port = cfg.port;
-        let bound_port = self.local_port();
-        let mut urls = cfg.connection_urls(&lan_addresses());
-        // If bound port differs from config (session fallback), rewrite URLs only.
-        if let Some(p) = bound_port {
-            if p != configured_port {
-                urls = vec![format!("http://127.0.0.1:{p}")];
-                if cfg.allow_lan {
-                    for ip in lan_addresses() {
-                        urls.push(format!("http://{ip}:{p}"));
-                    }
-                }
-            }
-        }
+        // Always the user-configured port from config.json — never a fallback.
+        let port = cfg.port;
+        let bound = self.local_port();
+        let urls = if running {
+            cfg.connection_urls(&lan_addresses())
+        } else {
+            Vec::new()
+        };
         let update = self.update.lock().clone();
         serde_json::json!({
             "running": running,
-            "port": configured_port,
-            "boundPort": bound_port,
+            "port": port,
+            "boundPort": bound,
             "serverEnabled": cfg.server_enabled,
             "allowLan": cfg.allow_lan,
             "token": cfg.token,
@@ -116,18 +108,21 @@ impl Host {
         ip_allowlist_enabled: bool,
         allowed_ips: Vec<String>,
     ) -> Result<(), String> {
-        let mut cfg = self.config();
-        let need_restart = self.is_running()
-            && (cfg.port != port
-                || cfg.allow_lan != allow_lan
-                || cfg.token != token
-                || cfg.allowed_domains != allowed_domains
-                || cfg.ip_allowlist_enabled != ip_allowlist_enabled
-                || cfg.allowed_ips != allowed_ips);
-
-        if port == 0 {
+        if !(1..=65535).contains(&port) {
             return Err("port must be between 1 and 65535".into());
         }
+
+        let prev = self.config();
+        let port_changed = prev.port != port;
+        let bind_related_changed = port_changed
+            || prev.allow_lan != allow_lan
+            || prev.token != token
+            || prev.allowed_domains != allowed_domains
+            || prev.ip_allowlist_enabled != ip_allowlist_enabled
+            || prev.allowed_ips != allowed_ips;
+        let was_running = self.is_running();
+
+        let mut cfg = prev;
         cfg.server_enabled = server_enabled;
         cfg.port = port;
         cfg.allow_lan = allow_lan;
@@ -135,9 +130,11 @@ impl Host {
         cfg.allowed_domains = allowed_domains;
         cfg.ip_allowlist_enabled = ip_allowlist_enabled;
         cfg.allowed_ips = allowed_ips;
+        // Persist user intent first — never lose a port edit if bind fails later.
         self.save_config(cfg)?;
 
-        if need_restart {
+        if was_running && bind_related_changed {
+            // Restart on the new settings. stop() does NOT rewrite config.
             self.stop();
             if server_enabled {
                 self.start()?;
@@ -156,9 +153,11 @@ impl Host {
         }
         let cfg = self.config();
         let webui = self.webui_dir.clone();
-        // Bind only to the user-configured port. Never auto-fallback and rewrite
-        // config.json — that made port changes appear to "snap back" in the UI.
-        let port = cfg.port.max(1);
+        // Exact user port only. No range scan, no random, no rewrite of config.port.
+        let port = cfg.port;
+        if port == 0 {
+            return Err("port must be between 1 and 65535".into());
+        }
         let mut c = cfg.clone();
         c.port = port;
         c.server_enabled = true;
@@ -169,9 +168,9 @@ impl Host {
         })) {
             Ok(h) => {
                 let addr = h.local_addr;
+                // Only flip server_enabled — never touch port.
                 let mut saved = self.config();
                 saved.server_enabled = true;
-                saved.port = port;
                 let _ = saved.save();
                 *self.config.lock() = saved;
                 *self.handle.lock() = Some(h);
@@ -181,22 +180,30 @@ impl Host {
             Err(e) => {
                 warn!(port, error = %e, "bind failed");
                 Err(format!(
-                    "port {port} is unavailable ({e}). Choose another port in Settings and Apply."
+                    "port {port} is unavailable ({e}). Choose another port and Apply."
                 ))
             }
         }
     }
 
+    /// Stop the listening server. Does **not** change `config.json` (port or flags).
     pub fn stop(&self) {
         let h = self.handle.lock().take();
         if let Some(h) = h {
             self.rt.block_on(h.stop());
             info!("server stopped");
         }
+    }
+
+    /// Stop and set `server_enabled = false` in config (user turned server off).
+    pub fn disable(&self) {
+        self.stop();
         let mut cfg = self.config();
-        cfg.server_enabled = false;
-        let _ = cfg.save();
-        *self.config.lock() = cfg;
+        if cfg.server_enabled {
+            cfg.server_enabled = false;
+            let _ = cfg.save();
+            *self.config.lock() = cfg;
+        }
     }
 
     pub fn start_if_enabled(&self) -> Result<(), String> {
@@ -213,7 +220,6 @@ impl Host {
         let t = cfg.token.clone();
         self.save_config(cfg)?;
         if self.is_running() {
-            // Token change requires restart to apply auth middleware.
             self.stop();
             let mut c = self.config();
             c.server_enabled = true;
