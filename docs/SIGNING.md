@@ -30,23 +30,46 @@ Grant **Screen Recording** and **Accessibility** once for **WebRust**. Rebuilds 
 SKIP_SIGN=1 ./build_app.sh   # ad-hoc; TCC may reset every rebuild
 ```
 
-## GitHub Release (Developer ID + notarization)
+## GitHub Release (Developer ID + notarization + `.pkg`)
 
-Same secrets pattern as WebDock’s `.github/workflows/release.yml`:
+**Same flow as WebDock** (`WebDock/.github/workflows/release.yml`):
+
+1. Import Developer ID Application (+ Installer) p12 into a temp keychain  
+2. Write App Store Connect API key (`AuthKey_<id>.p8`)  
+3. `SKIP_SIGN=1 ./build_app.sh` → inject version into Info.plist  
+4. `codesign --options runtime --timestamp` (binary, then `.app`) — **no** `get-task-allow`  
+5. `notarytool submit` + `stapler staple`  
+6. Zip + optional `pkgbuild` / `productbuild` / `productsign` + notarize `.pkg`
+
+Missing Application cert or API key **fails the job** (no silent ad-hoc release).
 
 | Secret | Purpose |
 |--------|---------|
-| `APPLE_CERTIFICATE_BASE64` | Developer ID Application `.p12` |
+| `APPLE_CERTIFICATE_BASE64` | Developer ID Application `.p12` (**required**) |
 | `APPLE_CERTIFICATE_PASSWORD` | p12 password |
-| `APPLE_INSTALLER_CERTIFICATE_BASE64` | Developer ID Installer (optional, for `.pkg`) |
+| `APPLE_INSTALLER_CERTIFICATE_BASE64` | Developer ID Installer `.p12` (for `.pkg`) |
 | `APPLE_INSTALLER_CERTIFICATE_PASSWORD` | Installer p12 password |
 | `APPLE_SIGN_IDENTITY` | e.g. `Developer ID Application: Name (TEAMID)` |
 | `APPLE_INSTALLER_IDENTITY` | e.g. `Developer ID Installer: Name (TEAMID)` |
-| `APPLE_API_KEY_P8` | App Store Connect API key body |
+| `APPLE_API_KEY_P8` | App Store Connect API key body (`.p8` PEM text) |
 | `APPLE_API_KEY_ID` | Key ID |
 | `APPLE_API_ISSUER_ID` | Issuer UUID |
+| `APPLE_TEAM_ID` | Team ID (optional metadata) |
 
-Local notarize helper: `./release_notarize.sh` (requires the same env/secrets as CI).
+### Artifacts
+
+| File | Notes |
+|------|--------|
+| `WebRust-macOS-*.zip` | Notarized `WebRust.app` |
+| `WebRust-macOS-*.pkg` | Installer → `/Applications` (needs Installer cert) |
+
+### Local notarize (same as WebDock)
+
+```bash
+# uses ~/private/apple-certs/notary.env
+./release_notarize.sh
+```
+
 
 ## Windows / Linux
 
