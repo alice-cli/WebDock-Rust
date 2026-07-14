@@ -61,7 +61,7 @@
       </div>
       <div class="row">
         <label class="lbl">Port</label>
-        <input type="number" id="port" min="1" max="65535" value="8090" />
+        <input type="number" id="port" min="1" max="65535" step="1" inputmode="numeric" placeholder="e.g. 8090" />
       </div>
       <div class="check">
         <input type="checkbox" id="allowLan" />
@@ -127,6 +127,9 @@
   <script>
     const $ = (id) => document.getElementById(id);
 
+    // Fields the user is editing — never overwrite from poll until Save succeeds.
+    const dirty = { port: false, token: false, domains: false, ips: false };
+
     function send(cmd, extra = {}) {
       const payload = JSON.stringify({ cmd, ...extra });
       if (window.ipc && window.ipc.postMessage) {
@@ -140,30 +143,57 @@
       return el.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
     }
 
+    /** Parse port from the input. Returns null if invalid (does NOT invent a default). */
+    function readPort() {
+      const raw = String($('port').value || '').trim();
+      if (!raw) return null;
+      const n = Number(raw);
+      if (!Number.isInteger(n) || n < 1 || n > 65535) return null;
+      return n;
+    }
+
+    function collectSettings() {
+      const port = readPort();
+      if (port == null) {
+        $('hint').textContent = 'Port must be an integer 1–65535';
+        $('port').focus();
+        return null;
+      }
+      return {
+        serverEnabled: $('serverEnabled').checked,
+        port,
+        allowLan: $('allowLan').checked,
+        token: $('token').value.trim(),
+        allowedDomains: lines($('domains')),
+        ipAllowlistEnabled: $('ipAllowlistEnabled').checked,
+        allowedIps: lines($('ips')),
+      };
+    }
+
     function applyState(s) {
       if (!s) return;
       const active = document.activeElement;
-      // Never clobber fields the user is currently editing (3s poll used to reset Port).
+
       if (active !== $('serverEnabled')) {
         $('serverEnabled').checked = !!s.serverEnabled || !!s.running;
       }
-      if (active !== $('port')) {
-        // Configured port only — not a temporary bind/fallback port.
-        $('port').value = (s.port != null && s.port !== 0) ? s.port : 8090;
+      // Only push server port into the field when user is not editing it.
+      if (!dirty.port && active !== $('port') && s.port != null && s.port !== 0) {
+        $('port').value = s.port;
       }
       if (active !== $('allowLan')) {
         $('allowLan').checked = !!s.allowLan;
       }
-      if (active !== $('token')) {
+      if (!dirty.token && active !== $('token')) {
         $('token').value = s.token || '';
       }
-      if (active !== $('domains')) {
+      if (!dirty.domains && active !== $('domains')) {
         $('domains').value = (s.allowedDomains || []).join('\n');
       }
       if (active !== $('ipAllowlistEnabled')) {
         $('ipAllowlistEnabled').checked = !!s.ipAllowlistEnabled;
       }
-      if (active !== $('ips')) {
+      if (!dirty.ips && active !== $('ips')) {
         $('ips').value = (s.allowedIps || []).join('\n');
       }
       const running = !!s.running;
@@ -180,13 +210,11 @@
         }).join('\n');
       }
       $('configPath').textContent = 'Config: ' + (s.configPath || '');
-      let hint = s.message || '';
-      if (running && s.boundPort && s.port && s.boundPort !== s.port) {
-        hint = (hint ? hint + ' · ' : '') + 'Listening on ' + s.boundPort + ' (configured ' + s.port + ')';
+      // Do not wipe an in-progress error the user is reading if message empty + dirty.
+      if (s.message || !dirty.port) {
+        $('hint').textContent = s.message || '';
       }
-      $('hint').textContent = hint;
 
-      // Version / update
       const ver = s.version || '';
       $('verBadge').textContent = ver ? ('v' + ver) : '—';
       const upd = s.update;
@@ -209,33 +237,29 @@
 
     window.__onHost = applyState;
 
-    $('btnApply').onclick = () => {
-      send('set', {
-        serverEnabled: $('serverEnabled').checked,
-        port: parseInt($('port').value, 10) || 8090,
-        allowLan: $('allowLan').checked,
-        token: $('token').value.trim(),
-        allowedDomains: lines($('domains')),
-        ipAllowlistEnabled: $('ipAllowlistEnabled').checked,
-        allowedIps: lines($('ips')),
-      });
-    };
+    $('port').addEventListener('input', () => { dirty.port = true; });
+    $('token').addEventListener('input', () => { dirty.token = true; });
+    $('domains').addEventListener('input', () => { dirty.domains = true; });
+    $('ips').addEventListener('input', () => { dirty.ips = true; });
+
+    function applySettings() {
+      const body = collectSettings();
+      if (!body) return;
+      send('set', body);
+      // Clear dirty after send; host will push Saved/Error and real state.
+      dirty.port = false;
+      dirty.token = false;
+      dirty.domains = false;
+      dirty.ips = false;
+    }
+
+    $('btnApply').onclick = () => applySettings();
     $('btnGen').onclick = () => send('genToken');
     $('btnOpen').onclick = () => send('openRemote');
     $('btnQuit').onclick = () => send('quit');
     $('btnCheckUpd').onclick = () => send('checkUpdate');
     $('btnOpenUpd').onclick = () => send('openUpdate');
-    $('serverEnabled').onchange = () => {
-      send('set', {
-        serverEnabled: $('serverEnabled').checked,
-        port: parseInt($('port').value, 10) || 8090,
-        allowLan: $('allowLan').checked,
-        token: $('token').value.trim(),
-        allowedDomains: lines($('domains')),
-        ipAllowlistEnabled: $('ipAllowlistEnabled').checked,
-        allowedIps: lines($('ips')),
-      });
-    };
+    $('serverEnabled').onchange = () => applySettings();
 
     send('get');
     setInterval(() => send('get'), 3000);

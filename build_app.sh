@@ -16,11 +16,17 @@ HASH_FILE="${WEBRUST_IDENTITY_HASH_FILE:-$HOME/Library/Application Support/WebRu
 echo "compiling WebRust (release)…"
 cargo build -p webdock-server --release
 
-# Icons (optional): reuse parent WebDock assets if present
+# App icon — must ship with the repo (CI has no sibling WebDock tree).
 ICON_SRC=""
-for c in Assets/AppIcon.icns ../WebDock/Assets/AppIcon.icns ../WebDock/MacRemote.png MacRemote.png; do
+for c in Assets/AppIcon.icns Assets/MacRemote.png MacRemote.png \
+         ../WebDock/Assets/AppIcon.icns ../WebDock/MacRemote.png; do
   if [[ -f "$c" ]]; then ICON_SRC="$c"; break; fi
 done
+if [[ -z "$ICON_SRC" ]]; then
+  echo "ERROR: no AppIcon (expected Assets/AppIcon.icns)" >&2
+  exit 1
+fi
+echo "icon: $ICON_SRC"
 
 rm -rf "${APP}"
 mkdir -p "${BIN_DIR}" "${RESOURCES}"
@@ -35,18 +41,21 @@ if [[ -d webui ]]; then
   cp -R webui/* "${RESOURCES}/webui/" 2>/dev/null || true
 fi
 
-if [[ -f "$ICON_SRC" && "$ICON_SRC" == *.icns ]]; then
+if [[ "$ICON_SRC" == *.icns ]]; then
   cp "$ICON_SRC" "${RESOURCES}/AppIcon.icns"
-elif [[ -f "$ICON_SRC" && "$ICON_SRC" == *.png ]]; then
-  mkdir -p /tmp/webrust-icon.iconset
+else
+  ICONSET=$(mktemp -d)/AppIcon.iconset
+  mkdir -p "$ICONSET"
   for s in 16 32 128 256 512; do
-    sips -z "$s" "$s" "$ICON_SRC" --out "/tmp/webrust-icon.iconset/icon_${s}x${s}.png" >/dev/null 2>&1 || true
+    sips -z "$s" "$s" "$ICON_SRC" --out "${ICONSET}/icon_${s}x${s}.png" >/dev/null
     s2=$((s * 2))
-    sips -z "$s2" "$s2" "$ICON_SRC" --out "/tmp/webrust-icon.iconset/icon_${s}x${s}@2x.png" >/dev/null 2>&1 || true
+    sips -z "$s2" "$s2" "$ICON_SRC" --out "${ICONSET}/icon_${s}x${s}@2x.png" >/dev/null
   done
-  iconutil -c icns /tmp/webrust-icon.iconset -o "${RESOURCES}/AppIcon.icns" 2>/dev/null || true
-  rm -rf /tmp/webrust-icon.iconset
+  iconutil -c icns "$ICONSET" -o "${RESOURCES}/AppIcon.icns"
+  rm -rf "$(dirname "$ICONSET")"
 fi
+test -f "${RESOURCES}/AppIcon.icns"
+echo "AppIcon.icns $(wc -c < "${RESOURCES}/AppIcon.icns") bytes"
 
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>

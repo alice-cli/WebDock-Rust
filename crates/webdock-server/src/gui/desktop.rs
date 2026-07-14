@@ -308,7 +308,7 @@ fn handle_ipc(host: &SharedHost, body: &str, push: &impl Fn(Option<String>)) {
             Err(e) => push(Some(format!("Start failed: {e}"))),
         },
         "stop" => {
-            host.stop();
+            host.disable();
             push(Some("Server stopped".into()));
         }
         "checkUpdate" => match updater::check_for_update() {
