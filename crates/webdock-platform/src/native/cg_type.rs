@@ -7,7 +7,6 @@
 
 use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation, CGKeyCode, KeyCode};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
-use tracing::warn;
 
 use crate::traits::InputError;
 
@@ -63,9 +62,4 @@ fn key_tap(code: CGKeyCode) -> Result<(), InputError> {
     up.set_flags(CGEventFlags::CGEventFlagNull);
     up.post(CGEventTapLocation::HID);
     Ok(())
-}
-
-/// Optional: log if Accessibility is missing (events silently dropped by macOS).
-pub fn warn_if_needed(err: &InputError) {
-    warn!(error = %err, "CGEvent input failed");
 }
