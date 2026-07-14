@@ -32,47 +32,44 @@ SKIP_SIGN=1 ./build_app.sh   # ad-hoc; TCC may reset every rebuild
 
 ## GitHub Release (Developer ID + notarization + `.pkg`)
 
-Same secrets pattern as WebDock’s `.github/workflows/release.yml`.
-Without `APPLE_CERTIFICATE_BASE64`, the release job **skips Developer ID** and
-ships an ad-hoc zip only (Gatekeeper will block downloads).
+**Same flow as WebDock** (`WebDock/.github/workflows/release.yml`):
+
+1. Import Developer ID Application (+ Installer) p12 into a temp keychain  
+2. Write App Store Connect API key (`AuthKey_<id>.p8`)  
+3. `SKIP_SIGN=1 ./build_app.sh` → inject version into Info.plist  
+4. `codesign --options runtime --timestamp` (binary, then `.app`) — **no** `get-task-allow`  
+5. `notarytool submit` + `stapler staple`  
+6. Zip + optional `pkgbuild` / `productbuild` / `productsign` + notarize `.pkg`
+
+Missing Application cert or API key **fails the job** (no silent ad-hoc release).
 
 | Secret | Purpose |
 |--------|---------|
-| `APPLE_CERTIFICATE_BASE64` | Developer ID Application `.p12` (**required** for signed zip) |
+| `APPLE_CERTIFICATE_BASE64` | Developer ID Application `.p12` (**required**) |
 | `APPLE_CERTIFICATE_PASSWORD` | p12 password |
-| `APPLE_INSTALLER_CERTIFICATE_BASE64` | Developer ID Installer `.p12` (**required** for `.pkg`) |
+| `APPLE_INSTALLER_CERTIFICATE_BASE64` | Developer ID Installer `.p12` (for `.pkg`) |
 | `APPLE_INSTALLER_CERTIFICATE_PASSWORD` | Installer p12 password |
-| `APPLE_SIGN_IDENTITY` | e.g. `Developer ID Application: Name (TEAMID)` (optional if unique) |
-| `APPLE_INSTALLER_IDENTITY` | e.g. `Developer ID Installer: Name (TEAMID)` (optional if unique) |
+| `APPLE_SIGN_IDENTITY` | e.g. `Developer ID Application: Name (TEAMID)` |
+| `APPLE_INSTALLER_IDENTITY` | e.g. `Developer ID Installer: Name (TEAMID)` |
 | `APPLE_API_KEY_P8` | App Store Connect API key body (`.p8` PEM text) |
 | `APPLE_API_KEY_ID` | Key ID |
 | `APPLE_API_ISSUER_ID` | Issuer UUID |
+| `APPLE_TEAM_ID` | Team ID (optional metadata) |
 
-### What the release job produces
+### Artifacts
 
-| Artifact | Needs |
-|----------|--------|
-| `WebRust-macOS-*.zip` | Always (Developer ID + notarized when Application cert + API key set) |
-| `WebRust-macOS-*.pkg` | Application + **Installer** cert; notarized when API key set |
+| File | Notes |
+|------|--------|
+| `WebRust-macOS-*.zip` | Notarized `WebRust.app` |
+| `WebRust-macOS-*.pkg` | Installer → `/Applications` (needs Installer cert) |
 
-### Copy secrets from WebDock
-
-If WebDock already signs releases, copy the same repo secrets into
-`alice-cli/WebDock-Rust` (Settings → Secrets and variables → Actions):
+### Local notarize (same as WebDock)
 
 ```bash
-# names only — values must be set in the GitHub UI or via `gh secret set`
-for s in \
-  APPLE_CERTIFICATE_BASE64 APPLE_CERTIFICATE_PASSWORD \
-  APPLE_INSTALLER_CERTIFICATE_BASE64 APPLE_INSTALLER_CERTIFICATE_PASSWORD \
-  APPLE_SIGN_IDENTITY APPLE_INSTALLER_IDENTITY \
-  APPLE_API_KEY_P8 APPLE_API_KEY_ID APPLE_API_ISSUER_ID
-do
-  echo "$s"
-done
+# uses ~/private/apple-certs/notary.env
+./release_notarize.sh
 ```
 
-Local notarize helper: `./release_notarize.sh` (requires the same env/secrets as CI).
 
 ## Windows / Linux
 
