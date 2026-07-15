@@ -254,9 +254,39 @@ const I18N = {
   }
 };
 
+// Prefer product-specific key; migrate legacy WebDock key so choice sticks.
+const LANG_KEY = 'webrust.lang';
+const LANG_KEY_LEGACY = 'webdock.lang';
+/** Elements whose label is managed at runtime — applyI18n must not clobber them. */
+const I18N_SKIP_IDS = new Set([
+  'statusText',   // live connection / stream status
+  'clipAutoBtn',  // toggles clipAutoOn / clipAutoOff
+  'menuBtn',      // menu ↔ close (syncMenuBtn)
+  'imeBtn',       // IME titles via applyIMEState
+  'quickEditBtn', // edit ↔ done
+  'modalOk',      // may show closeWinTitle etc.
+  'langSelect',
+]);
+
+function readStoredLang(){
+  try {
+    const a = localStorage.getItem(LANG_KEY) || localStorage.getItem(LANG_KEY_LEGACY);
+    if (a && I18N[a]) return a;
+  } catch (_) {}
+  return null;
+}
+
+function writeStoredLang(code){
+  try {
+    localStorage.setItem(LANG_KEY, code);
+    // Keep legacy key so shared bookmarks / older builds still see the choice.
+    localStorage.setItem(LANG_KEY_LEGACY, code);
+  } catch (_) {}
+}
+
 function detectLang(){
-  const saved = localStorage.getItem('webdock.lang');
-  if (saved && I18N[saved]) return saved;
+  const saved = readStoredLang();
+  if (saved) return saved;
   const n = (navigator.language || 'en').toLowerCase();
   if (n.startsWith('ko')) return 'ko';
   if (n.startsWith('ja')) return 'ja';
@@ -266,64 +296,126 @@ function detectLang(){
   return 'en';
 }
 let lang = detectLang();
+let _langApplying = false;
 
 function t(key){
   const pack = I18N[lang] || I18N.en;
   return pack[key] || I18N.en[key] || key;
 }
 
-function setLang(code){
-  if (!I18N[code]) code = 'en';
-  lang = code;
-  localStorage.setItem('webdock.lang', code);
-  document.documentElement.lang = code === 'zh' ? 'zh-CN' : code;
-  applyI18n();
-  // Re-render dynamic lists so titles/hints update
-  try { renderQuick(); } catch(_){}
-  try { if (typeof render === 'function') render(); } catch(_){}
-  try { if (typeof renderClients === 'function') renderClients(window._lastClients || []); } catch(_){}
-  try { syncClipAutoBtn(); applyIMEState(imeKorean); } catch(_){}
-  try {
-    if (typeof streamPreset !== 'undefined') {
-      // refresh preset status label in current language
-      const map = { fast:'presetFast', balanced:'presetBal', broadcast:'presetLive' };
-      // only rewrite if looks like a preset status
-    }
-  } catch(_){}
+function syncLangSelect(){
   const sel = document.getElementById('langSelect');
-  if (sel) sel.value = code;
+  if (!sel) return;
+  // Only update when different — avoids spurious change events on some WebViews.
+  if (sel.value !== lang) sel.value = lang;
+}
+
+/**
+ * User-initiated language change. Invalid codes are ignored (never force "en"),
+ * so a bad select value cannot snap the UI back to English/Korean.
+ */
+function setLang(code){
+  if (!code || !I18N[code]) return;
+  if (code === lang && !_langApplying) {
+    // Still re-assert storage + select (fixes UI desync without re-detect).
+    writeStoredLang(code);
+    syncLangSelect();
+    return;
+  }
+  _langApplying = true;
+  try {
+    lang = code;
+    writeStoredLang(code);
+    document.documentElement.lang = code === 'zh' ? 'zh-CN' : code;
+    applyI18n();
+    // Re-render dynamic lists so titles/hints update in the new language.
+    try { renderQuick(); } catch(_){}
+    try { if (typeof render === 'function') render(); } catch(_){}
+    try { if (typeof renderClients === 'function') renderClients(window._lastClients || []); } catch(_){}
+    try { if (typeof syncClipAutoBtn === 'function') syncClipAutoBtn(); } catch(_){}
+    try { if (typeof applyIMEState === 'function') applyIMEState(typeof imeKorean !== 'undefined' ? imeKorean : false); } catch(_){}
+    try { if (typeof syncMenuBtn === 'function') syncMenuBtn(); } catch(_){}
+    syncLangSelect();
+    // Some WebViews reflow the <select> asynchronously — pin value again.
+    requestAnimationFrame(() => {
+      syncLangSelect();
+      // storage still wins if something rewrote the select
+      const again = readStoredLang();
+      if (again && again !== lang && I18N[again]) {
+        lang = again;
+        applyI18n();
+        syncLangSelect();
+      }
+    });
+  } finally {
+    _langApplying = false;
+  }
 }
 
 function applyI18n(){
   document.querySelectorAll('[data-i18n]').forEach(el => {
     const k = el.getAttribute('data-i18n');
     if (!k) return;
-    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') return;
+    if (el.id && I18N_SKIP_IDS.has(el.id)) return;
+    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') return;
+    // Never wipe interactive controls inside a labelled wrapper.
+    if (el.querySelector && el.querySelector('select, input, textarea, button')) return;
     const html = el.getAttribute('data-i18n-html') === '1';
     if (html) el.innerHTML = t(k);
     else el.textContent = t(k);
   });
   document.querySelectorAll('[data-i18n-title]').forEach(el => {
-    el.title = t(el.getAttribute('data-i18n-title'));
+    if (el.id && I18N_SKIP_IDS.has(el.id)) return;
+    const k = el.getAttribute('data-i18n-title');
+    if (k) el.title = t(k);
   });
   document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
-    el.placeholder = t(el.getAttribute('data-i18n-placeholder'));
+    const k = el.getAttribute('data-i18n-placeholder');
+    if (k) el.placeholder = t(k);
   });
   const cancel = document.getElementById('modalCancel');
   if (cancel) cancel.textContent = t('cancel');
   const ok = document.getElementById('modalOk');
-  if (ok && !modalResolve) ok.textContent = t('confirm');
-  const qeb = document.getElementById('quickEditBtn');
-  if (qeb) qeb.textContent = (typeof quickEdit !== 'undefined' && quickEdit) ? t('done') : t('edit');
+  // Don't overwrite modal OK while a confirm dialog is open (custom okText).
+  if (ok && (typeof modalResolve === 'undefined' || !modalResolve)) {
+    ok.textContent = t('confirm');
+  }
   const themeBtn = document.getElementById('themeBtn');
   if (themeBtn) {
     const light = document.documentElement.classList.contains('light');
     themeBtn.title = light ? t('themeDark') : t('themeLight');
   }
-  const menuBtn = document.getElementById('menuBtn');
-  if (menuBtn) {
-    const open = document.body.classList.contains('side-open') || document.body.classList.contains('side-drawer-open');
-    // keep current open/close label if mobile uses toggle
+  // Always keep the language dropdown in sync with the active pack.
+  syncLangSelect();
+}
+
+function bindLangSelect(){
+  const sel = document.getElementById('langSelect');
+  if (!sel || sel.dataset.langBound === '1') return;
+  sel.dataset.langBound = '1';
+  // Prefer JS listener over inline onchange (clearer, one path).
+  sel.addEventListener('change', () => {
+    const v = sel.value;
+    if (I18N[v]) setLang(v);
+    else syncLangSelect(); // reject unknown → snap select back to active lang
+  });
+  syncLangSelect();
+}
+
+// bfcache / tab restore: re-apply stored language, never re-run navigator detect.
+window.addEventListener('pageshow', () => {
+  const stored = readStoredLang();
+  if (stored && stored !== lang) setLang(stored);
+  else {
+    bindLangSelect();
+    syncLangSelect();
   }
+});
+
+// DOM may already be ready (scripts at end of body).
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', bindLangSelect);
+} else {
+  bindLangSelect();
 }
 
