@@ -25,6 +25,19 @@ const AX_OK: AXError = 0;
 /// ANSI W (kVK_ANSI_W) — Cmd+W close shortcut.
 const KEY_W: CGKeyCode = 0x0D;
 
+/// AX attribute/action name held for the duration of a call.
+/// Linking `kAX*Attribute` C statics fails on some arm64 linkers; string form
+/// matches the public Accessibility API values WebDock uses.
+struct AxName(CFString);
+impl AxName {
+    fn new(s: &'static str) -> Self {
+        Self(CFString::from_static_string(s))
+    }
+    fn r(&self) -> CFStringRef {
+        self.0.as_concrete_TypeRef()
+    }
+}
+
 #[link(name = "ApplicationServices", kind = "framework")]
 unsafe extern "C" {
     fn AXUIElementCreateApplication(pid: i32) -> AXUIElementRef;
@@ -34,12 +47,6 @@ unsafe extern "C" {
         value: *mut CFTypeRef,
     ) -> AXError;
     fn AXUIElementPerformAction(element: AXUIElementRef, action: CFStringRef) -> AXError;
-
-    static kAXWindowsAttribute: CFStringRef;
-    static kAXTitleAttribute: CFStringRef;
-    static kAXCloseButtonAttribute: CFStringRef;
-    static kAXRaiseAction: CFStringRef;
-    static kAXPressAction: CFStringRef;
 
     /// Private HIServices symbol (same as WebDock AccessibilityHelpers).
     fn _AXUIElementGetWindow(element: AXUIElementRef, out_wid: *mut u32) -> AXError;
@@ -75,18 +82,21 @@ fn close_via_ax(pid: i32, window_id: u32, title: Option<&str>) -> bool {
     let Some(window) = find_ax_window(pid, window_id, title) else {
         return false;
     };
+    let raise = AxName::new("AXRaise");
+    let close_attr = AxName::new("AXCloseButton");
+    let press = AxName::new("AXPress");
     unsafe {
         // Raise target first so the close button is live.
-        let _ = AXUIElementPerformAction(window, kAXRaiseAction);
+        let _ = AXUIElementPerformAction(window, raise.r());
 
         let mut close_ref: CFTypeRef = ptr::null();
-        let err = AXUIElementCopyAttributeValue(window, kAXCloseButtonAttribute, &mut close_ref);
+        let err = AXUIElementCopyAttributeValue(window, close_attr.r(), &mut close_ref);
         if err != AX_OK || close_ref.is_null() {
             CFRelease(window as CFTypeRef);
             return false;
         }
         let close_btn = close_ref as AXUIElementRef;
-        let ok = AXUIElementPerformAction(close_btn, kAXPressAction) == AX_OK;
+        let ok = AXUIElementPerformAction(close_btn, press.r()) == AX_OK;
         CFRelease(close_ref);
         CFRelease(window as CFTypeRef);
         ok
@@ -94,17 +104,18 @@ fn close_via_ax(pid: i32, window_id: u32, title: Option<&str>) -> bool {
 }
 
 fn close_via_cmd_w(pid: i32, window_id: u32, title: Option<&str>) -> bool {
+    let raise = AxName::new("AXRaise");
     // Raise the exact window when possible, else front the process.
     if let Some(window) = find_ax_window(pid, window_id, title) {
         unsafe {
-            let _ = AXUIElementPerformAction(window, kAXRaiseAction);
+            let _ = AXUIElementPerformAction(window, raise.r());
             CFRelease(window as CFTypeRef);
         }
     } else {
         unsafe {
             let app = AXUIElementCreateApplication(pid);
             if !app.is_null() {
-                let _ = AXUIElementPerformAction(app, kAXRaiseAction);
+                let _ = AXUIElementPerformAction(app, raise.r());
                 CFRelease(app as CFTypeRef);
             }
         }
@@ -142,8 +153,9 @@ fn find_ax_window(pid: i32, window_id: u32, title: Option<&str>) -> Option<AXUIE
             return None;
         }
 
+        let windows_attr = AxName::new("AXWindows");
         let mut windows_ref: CFTypeRef = ptr::null();
-        let err = AXUIElementCopyAttributeValue(app, kAXWindowsAttribute, &mut windows_ref);
+        let err = AXUIElementCopyAttributeValue(app, windows_attr.r(), &mut windows_ref);
         CFRelease(app as CFTypeRef);
         if err != AX_OK || windows_ref.is_null() {
             return None;
@@ -152,6 +164,7 @@ fn find_ax_window(pid: i32, window_id: u32, title: Option<&str>) -> Option<AXUIE
         let array = windows_ref as CFArrayRef;
         let count = CFArrayGetCount(array);
         let mut by_title: Option<AXUIElementRef> = None;
+        let title_attr = AxName::new("AXTitle");
 
         for i in 0..count {
             let item = CFArrayGetValueAtIndex(array, i) as AXUIElementRef;
@@ -168,7 +181,8 @@ fn find_ax_window(pid: i32, window_id: u32, title: Option<&str>) -> Option<AXUIE
             }
             if by_title.is_none() {
                 if let Some(t) = title {
-                    if !t.is_empty() && ax_title(item).as_deref() == Some(t) {
+                    if !t.is_empty() && ax_window_title(item, title_attr.r()).as_deref() == Some(t)
+                    {
                         by_title = Some(CFRetain(item as CFTypeRef) as AXUIElementRef);
                     }
                 }
@@ -180,10 +194,10 @@ fn find_ax_window(pid: i32, window_id: u32, title: Option<&str>) -> Option<AXUIE
     }
 }
 
-fn ax_title(element: AXUIElementRef) -> Option<String> {
+fn ax_window_title(element: AXUIElementRef, title_attr: CFStringRef) -> Option<String> {
     unsafe {
         let mut title_ref: CFTypeRef = ptr::null();
-        let err = AXUIElementCopyAttributeValue(element, kAXTitleAttribute, &mut title_ref);
+        let err = AXUIElementCopyAttributeValue(element, title_attr, &mut title_ref);
         if err != AX_OK || title_ref.is_null() {
             return None;
         }
