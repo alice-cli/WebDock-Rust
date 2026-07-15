@@ -240,23 +240,59 @@ jobs:
           PKG_ROOT="$RUNNER_TEMP/pkgroot"
           rm -rf "$PKG_ROOT"
           mkdir -p "$PKG_ROOT/Applications"
-          # Notarized app into payload (same as WebDock)
+          # Payload → /Applications/WebRust.app (install-location /)
           ditto WebRust.app "$PKG_ROOT/Applications/WebRust.app"
 
           COMPONENT_PKG="$RUNNER_TEMP/WebRust-component.pkg"
           UNSIGNED_PKG="$RUNNER_TEMP/WebRust-unsigned.pkg"
           SIGNED_PKG="dist/WebRust-macOS-${VER}.pkg"
+          COMP_PLIST="$RUNNER_TEMP/component.plist"
+          DIST_XML="$RUNNER_TEMP/distribution.xml"
+          RESOURCES="$RUNNER_TEMP/pkg-resources"
+          mkdir -p "$RESOURCES"
+          cp packaging/macos/component.plist.in "$COMP_PLIST"
+          cp packaging/macos/welcome.html "$RESOURCES/welcome.html"
+          # Force /Applications (not ~/…); disable bundle relocation to old paths.
+          sed -e "s/__VERSION__/${VER}/g" \
+              -e "s/__COMPONENT_PKG__/WebRust-component.pkg/g" \
+              packaging/macos/distribution.xml.in > "$DIST_XML"
 
           pkgbuild \
             --root "$PKG_ROOT" \
             --identifier com.poc.webrust \
             --version "$VER" \
             --install-location / \
+            --component-plist "$COMP_PLIST" \
             "$COMPONENT_PKG"
 
+          # productbuild with domains: localSystem only → 응용 프로그램
+          # (default productbuild --package allows user-home / relocate)
           productbuild \
-            --package "$COMPONENT_PKG" \
+            --distribution "$DIST_XML" \
+            --resources "$RESOURCES" \
+            --package-path "$RUNNER_TEMP" \
             "$UNSIGNED_PKG"
+
+          # Sanity: empty <relocate/> is OK; <relocate><bundle…> would redirect install.
+          EXP="$RUNNER_TEMP/pkg-expand-check"
+          rm -rf "$EXP"
+          pkgutil --expand "$UNSIGNED_PKG" "$EXP"
+          if grep -qE '<relocate>[[:space:]]*<bundle' "$EXP"/*/PackageInfo 2>/dev/null; then
+            echo "::error::pkg still relocates bundles — would install outside /Applications"
+            cat "$EXP"/*/PackageInfo
+            exit 1
+          fi
+          if ! grep -q 'enable_localSystem="true"' "$EXP/Distribution"; then
+            echo "::error::Distribution missing localSystem domain"
+            cat "$EXP/Distribution"
+            exit 1
+          fi
+          if ! grep -q 'enable_currentUserHome="false"' "$EXP/Distribution"; then
+            echo "::error::Distribution still allows user-home install"
+            cat "$EXP/Distribution"
+            exit 1
+          fi
+          echo "pkg targets /Applications (system domain, no relocate) ✓"
 
           productsign \
             --sign "$INST_ID" \
@@ -312,8 +348,8 @@ jobs:
 
             | File | Platform |
             |------|----------|
-            | **`WebRust-macOS-*.pkg`** | macOS installer → **Applications** (Developer ID + notarized when secrets set) |
-            | `WebRust-macOS-*.zip` | macOS 14+ portable `WebRust.app` |
+            | **`WebRust-macOS-*.pkg`** | Installer → **`/Applications/WebRust.app`** (Developer ID + notarized) |
+            | `WebRust-macOS-*.zip` | Portable; drag to Applications yourself |
             | `WebRust-Setup-*.exe` | **Windows installer** (recommended) |
             | `WebRust-windows-*.zip` | Windows x64 portable + webui |
             | `WebRust-linux-*.tar.gz` | Linux x64 + webui |
@@ -322,8 +358,8 @@ jobs:
 
             ### Install
             - **Windows:** run `WebRust-Setup-*.exe` → Start Menu / tray
-            - **macOS (pkg):** open **WebRust-macOS-….pkg** → install to Applications
-            - **macOS (zip):** unzip → open **WebRust.app** → Screen Recording + Accessibility → port **8090**
+            - **macOS (pkg):** open **WebRust-macOS-….pkg** → installs to **`/Applications/WebRust.app`** (응용 프로그램)
+            - **macOS (zip):** unzip → drag **WebRust.app** into Applications → Screen Recording + Accessibility → port **8090**
             - **Linux:** extract → `./WebRust` (tray) or `./WebRust --cli --port 8090`
 
             ### Auto-update

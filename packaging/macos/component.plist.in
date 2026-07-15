@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  BundleIsRelocatable=false is required.
+  Without it, Installer "relocates" into any existing WebRust.app
+  (e.g. ~/WebRust.app or a repo build) instead of /Applications.
+-->
+<plist version="1.0">
+<array>
+  <dict>
+    <key>RootRelativeBundlePath</key>
+    <string>Applications/WebRust.app</string>
+    <key>BundleIdentifier</key>
+    <string>com.poc.webrust</string>
+    <key>BundleIsRelocatable</key>
+    <false/>
+    <key>BundleIsVersionChecked</key>
+    <true/>
+    <key>BundleHasStrictIdentifier</key>
+    <true/>
+    <key>BundleOverwriteAction</key>
+    <string>upgrade</string>
+  </dict>
+</array>
+</plist>

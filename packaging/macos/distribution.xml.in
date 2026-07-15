@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Force install domain = local system (/Applications), not user home.
+  Placeholders: __VERSION__  __COMPONENT_PKG__
+-->
+<installer-gui-script minSpecVersion="2">
+    <title>WebRust</title>
+    <organization>com.poc</organization>
+    <domains enable_anywhere="false"
+             enable_currentUserHome="false"
+             enable_localSystem="true"/>
+    <options customize="never"
+             require-scripts="false"
+             hostArchitectures="x86_64,arm64"/>
+    <welcome file="welcome.html" mime-type="text/html"/>
+    <choices-outline>
+        <line choice="default">
+            <line choice="com.poc.webrust"/>
+        </line>
+    </choices-outline>
+    <choice id="default" title="WebRust" start_selected="true"/>
+    <choice id="com.poc.webrust" visible="false" title="WebRust">
+        <pkg-ref id="com.poc.webrust"/>
+    </choice>
+    <pkg-ref id="com.poc.webrust"
+             version="__VERSION__"
+             onConclusion="none">#__COMPONENT_PKG__</pkg-ref>
+    <pkg-ref id="com.poc.webrust">
+        <bundle-version>
+            <bundle id="com.poc.webrust" path="Applications/WebRust.app"/>
+        </bundle-version>
+    </pkg-ref>
+</installer-gui-script>
