@@ -369,16 +369,20 @@ fn handle_client_text(
             let w = WindowRef {
                 id,
                 pid: resolved_pid,
+                title: title.filter(|s| !s.is_empty()),
             };
             match state.platform.windows.close(&w) {
                 Ok(()) => {
+                    // Drop capture for this window (other windows of same app keep streaming).
+                    let target = AppState::capture_target(id.as_i64());
+                    state.platform.capture.stop_stream(target);
+                    state.clear_streaming(id.as_i64());
                     state.push_windows_to(peer_id);
                 }
                 Err(e) => {
                     warn!(error = %e, "close window failed");
                 }
             }
-            let _ = title;
         }
         ClientMessage::Quit { pid } => {
             if !state.pid_in_window_list(pid) {
@@ -525,10 +529,7 @@ fn claim(state: &AppState, peer_id: u64, ip: &str, kind: InputKind) -> bool {
 
 fn target_window(state: &AppState, peer_id: u64) -> Option<WindowRef> {
     let id = state.viewing_of(peer_id)?;
-    Some(WindowRef {
-        id: RouteId(id),
-        pid: 0,
-    })
+    Some(WindowRef::new(RouteId(id), 0))
 }
 
 /// Start capture if not already marked streaming.

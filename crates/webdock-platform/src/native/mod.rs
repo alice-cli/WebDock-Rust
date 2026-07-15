@@ -1,6 +1,8 @@
 //! Production platform backends (xcap + enigo + OS helpers).
 
 mod apps;
+#[cfg(target_os = "macos")]
+mod ax_close;
 mod capture;
 #[cfg(target_os = "macos")]
 mod cg_mouse;
