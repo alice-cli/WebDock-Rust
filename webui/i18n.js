@@ -254,19 +254,9 @@ const I18N = {
   }
 };
 
-// Prefer product-specific key; migrate legacy WebDock key so choice sticks.
+// Product key + legacy WebDock key (same as WebDock persistence model).
 const LANG_KEY = 'webrust.lang';
 const LANG_KEY_LEGACY = 'webdock.lang';
-/** Elements whose label is managed at runtime — applyI18n must not clobber them. */
-const I18N_SKIP_IDS = new Set([
-  'statusText',   // live connection / stream status
-  'clipAutoBtn',  // toggles clipAutoOn / clipAutoOff
-  'menuBtn',      // menu ↔ close (syncMenuBtn)
-  'imeBtn',       // IME titles via applyIMEState
-  'quickEditBtn', // edit ↔ done
-  'modalOk',      // may show closeWinTitle etc.
-  'langSelect',
-]);
 
 function readStoredLang(){
   try {
@@ -279,7 +269,6 @@ function readStoredLang(){
 function writeStoredLang(code){
   try {
     localStorage.setItem(LANG_KEY, code);
-    // Keep legacy key so shared bookmarks / older builds still see the choice.
     localStorage.setItem(LANG_KEY_LEGACY, code);
   } catch (_) {}
 }
@@ -296,76 +285,57 @@ function detectLang(){
   return 'en';
 }
 let lang = detectLang();
-let _langApplying = false;
 
 function t(key){
   const pack = I18N[lang] || I18N.en;
   return pack[key] || I18N.en[key] || key;
 }
 
-function syncLangSelect(){
-  const sel = document.getElementById('langSelect');
-  if (!sel) return;
-  // Only update when different — avoids spurious change events on some WebViews.
-  if (sel.value !== lang) sel.value = lang;
-}
-
 /**
- * User-initiated language change. Invalid codes are ignored (never force "en"),
- * so a bad select value cannot snap the UI back to English/Korean.
+ * Apply language in one shot (WebDock setLang parity).
+ * Always runs applyI18n — never early-return when code===lang (that caused
+ * "need to click twice" when memory and UI were out of sync).
  */
 function setLang(code){
   if (!code || !I18N[code]) return;
-  if (code === lang && !_langApplying) {
-    // Still re-assert storage + select (fixes UI desync without re-detect).
-    writeStoredLang(code);
-    syncLangSelect();
-    return;
-  }
-  _langApplying = true;
+  lang = code;
+  writeStoredLang(code);
+  document.documentElement.lang = code === 'zh' ? 'zh-CN' : code;
+  applyI18n();
+  // Re-render dynamic lists so titles/hints update (WebDock does the same).
+  try { renderQuick(); } catch(_){}
+  try { if (typeof render === 'function') render(); } catch(_){}
   try {
-    lang = code;
-    writeStoredLang(code);
-    document.documentElement.lang = code === 'zh' ? 'zh-CN' : code;
-    applyI18n();
-    // Re-render dynamic lists so titles/hints update in the new language.
-    try { renderQuick(); } catch(_){}
-    try { if (typeof render === 'function') render(); } catch(_){}
-    try { if (typeof renderClients === 'function') renderClients(window._lastClients || []); } catch(_){}
-    try { if (typeof syncClipAutoBtn === 'function') syncClipAutoBtn(); } catch(_){}
-    try { if (typeof applyIMEState === 'function') applyIMEState(typeof imeKorean !== 'undefined' ? imeKorean : false); } catch(_){}
-    try { if (typeof syncMenuBtn === 'function') syncMenuBtn(); } catch(_){}
-    syncLangSelect();
-    // Some WebViews reflow the <select> asynchronously — pin value again.
-    requestAnimationFrame(() => {
-      syncLangSelect();
-      // storage still wins if something rewrote the select
-      const again = readStoredLang();
-      if (again && again !== lang && I18N[again]) {
-        lang = again;
-        applyI18n();
-        syncLangSelect();
-      }
-    });
-  } finally {
-    _langApplying = false;
-  }
+    if (typeof mode !== 'undefined' && mode === 'apps' && typeof renderAppItems === 'function') {
+      renderAppItems();
+    }
+  } catch(_){}
+  try { if (typeof renderClients === 'function') renderClients(window._lastClients || []); } catch(_){}
+  try { if (typeof syncClipAutoBtn === 'function') syncClipAutoBtn(); } catch(_){}
+  try {
+    if (typeof applyIMEState === 'function') {
+      applyIMEState(typeof imeKorean !== 'undefined' ? imeKorean : false);
+    }
+  } catch(_){}
+  try { if (typeof syncMenuBtn === 'function') syncMenuBtn(); } catch(_){}
+  const sel = document.getElementById('langSelect');
+  if (sel) sel.value = code;
 }
 
 function applyI18n(){
   document.querySelectorAll('[data-i18n]').forEach(el => {
     const k = el.getAttribute('data-i18n');
     if (!k) return;
-    if (el.id && I18N_SKIP_IDS.has(el.id)) return;
+    // Skip controls whose text is owned by runtime helpers (re-synced in setLang).
+    if (el.id === 'statusText' || el.id === 'clipAutoBtn' || el.id === 'menuBtn'
+        || el.id === 'quickEditBtn') return;
     if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') return;
-    // Never wipe interactive controls inside a labelled wrapper.
-    if (el.querySelector && el.querySelector('select, input, textarea, button')) return;
     const html = el.getAttribute('data-i18n-html') === '1';
     if (html) el.innerHTML = t(k);
     else el.textContent = t(k);
   });
   document.querySelectorAll('[data-i18n-title]').forEach(el => {
-    if (el.id && I18N_SKIP_IDS.has(el.id)) return;
+    if (el.id === 'imeBtn') return; // applyIMEState owns title
     const k = el.getAttribute('data-i18n-title');
     if (k) el.title = t(k);
   });
@@ -376,7 +346,6 @@ function applyI18n(){
   const cancel = document.getElementById('modalCancel');
   if (cancel) cancel.textContent = t('cancel');
   const ok = document.getElementById('modalOk');
-  // Don't overwrite modal OK while a confirm dialog is open (custom okText).
   if (ok && (typeof modalResolve === 'undefined' || !modalResolve)) {
     ok.textContent = t('confirm');
   }
@@ -385,37 +354,7 @@ function applyI18n(){
     const light = document.documentElement.classList.contains('light');
     themeBtn.title = light ? t('themeDark') : t('themeLight');
   }
-  // Always keep the language dropdown in sync with the active pack.
-  syncLangSelect();
-}
-
-function bindLangSelect(){
   const sel = document.getElementById('langSelect');
-  if (!sel || sel.dataset.langBound === '1') return;
-  sel.dataset.langBound = '1';
-  // Prefer JS listener over inline onchange (clearer, one path).
-  sel.addEventListener('change', () => {
-    const v = sel.value;
-    if (I18N[v]) setLang(v);
-    else syncLangSelect(); // reject unknown → snap select back to active lang
-  });
-  syncLangSelect();
-}
-
-// bfcache / tab restore: re-apply stored language, never re-run navigator detect.
-window.addEventListener('pageshow', () => {
-  const stored = readStoredLang();
-  if (stored && stored !== lang) setLang(stored);
-  else {
-    bindLangSelect();
-    syncLangSelect();
-  }
-});
-
-// DOM may already be ready (scripts at end of body).
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', bindLangSelect);
-} else {
-  bindLangSelect();
+  if (sel && sel.value !== lang) sel.value = lang;
 }
 
