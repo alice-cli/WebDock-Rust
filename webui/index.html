@@ -12,7 +12,7 @@
         <link rel="icon" type="image/png" sizes="192x192" href="/favicon-192.png">
         <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
         <link rel="shortcut icon" href="/favicon.png">
-        <link rel="stylesheet" href="/styles.css">
+        <link rel="stylesheet" href="/styles.css?v=__WEBRUST_VER__">
         </head>
         <body>
           <div id="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
@@ -27,7 +27,7 @@
           </div>
 
           <header id="topbar">
-            <button type="button" id="menuBtn" class="textbtn" onclick="toggleSidebar()" data-i18n="menu" data-i18n-title="menuTitle">Menu</button>
+            <button type="button" id="menuBtn" class="textbtn" onclick="toggleSidebar()" data-i18n-title="menuTitle">Menu</button>
             <span id="dot" data-i18n-title="connecting"></span>
             <div id="metrics" class="metrics">
               <span class="metric" id="mCpu" title="CPU">
@@ -131,14 +131,14 @@
                 <button class="mini" onclick="zoomInStep()" data-i18n-title="zoomIn">＋</button>
                 <button class="mini" onclick="zoomOutStep()" data-i18n-title="zoomOut">－</button>
                 <span id="zoomHint" class="zoom-hint">100%</span>
-                <button type="button" class="mini clip-auto on" id="clipAutoBtn" onclick="toggleClipAuto()" aria-pressed="true" data-i18n="clipAutoOn">📋 Auto</button>
+                <button type="button" class="mini clip-auto on" id="clipAutoBtn" onclick="toggleClipAuto()" aria-pressed="true">📋 Auto</button>
                 <button type="button" class="mini" id="clipPullBtn" onclick="pullRemoteClipboard()" data-i18n="clipPull">Pull</button>
-                <span id="statusText" data-i18n="connecting">Connecting…</span>
+                <span id="statusText">Connecting…</span>
                 <span class="keys"></span>
               </div>
             </div>
           </div>
-        <script src="/i18n.js"></script>
-        <script src="/app.js"></script>
+        <script src="/i18n.js?v=__WEBRUST_VER__"></script>
+        <script src="/app.js?v=__WEBRUST_VER__"></script>
         </body>
         </html>

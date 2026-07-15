@@ -254,28 +254,14 @@ const I18N = {
   }
 };
 
-// Product key + legacy WebDock key (same as WebDock persistence model).
 const LANG_KEY = 'webrust.lang';
 const LANG_KEY_LEGACY = 'webdock.lang';
 
-function readStoredLang(){
-  try {
-    const a = localStorage.getItem(LANG_KEY) || localStorage.getItem(LANG_KEY_LEGACY);
-    if (a && I18N[a]) return a;
-  } catch (_) {}
-  return null;
-}
-
-function writeStoredLang(code){
-  try {
-    localStorage.setItem(LANG_KEY, code);
-    localStorage.setItem(LANG_KEY_LEGACY, code);
-  } catch (_) {}
-}
-
 function detectLang(){
-  const saved = readStoredLang();
-  if (saved) return saved;
+  try {
+    const saved = localStorage.getItem(LANG_KEY) || localStorage.getItem(LANG_KEY_LEGACY);
+    if (saved && I18N[saved]) return saved;
+  } catch (_) {}
   const n = (navigator.language || 'en').toLowerCase();
   if (n.startsWith('ko')) return 'ko';
   if (n.startsWith('ja')) return 'ja';
@@ -284,25 +270,25 @@ function detectLang(){
   if (n.startsWith('fr')) return 'fr';
   return 'en';
 }
-let lang = detectLang();
+
+/** Active UI language — single source of truth (WebDock-style). */
+var lang = detectLang();
 
 function t(key){
   const pack = I18N[lang] || I18N.en;
   return pack[key] || I18N.en[key] || key;
 }
 
-/**
- * Apply language in one shot (WebDock setLang parity).
- * Always runs applyI18n — never early-return when code===lang (that caused
- * "need to click twice" when memory and UI were out of sync).
- */
 function setLang(code){
-  if (!code || !I18N[code]) return;
+  // WebDock: invalid → en.
+  if (!I18N[code]) code = 'en';
   lang = code;
-  writeStoredLang(code);
+  try {
+    localStorage.setItem(LANG_KEY, code);
+    localStorage.setItem(LANG_KEY_LEGACY, code);
+  } catch (_) {}
   document.documentElement.lang = code === 'zh' ? 'zh-CN' : code;
   applyI18n();
-  // Re-render dynamic lists so titles/hints update (WebDock does the same).
   try { renderQuick(); } catch(_){}
   try { if (typeof render === 'function') render(); } catch(_){}
   try {
@@ -314,28 +300,26 @@ function setLang(code){
   try { if (typeof syncClipAutoBtn === 'function') syncClipAutoBtn(); } catch(_){}
   try {
     if (typeof applyIMEState === 'function') {
-      applyIMEState(typeof imeKorean !== 'undefined' ? imeKorean : false);
+      applyIMEState(typeof imeKorean !== 'undefined' ? !!imeKorean : false);
     }
   } catch(_){}
   try { if (typeof syncMenuBtn === 'function') syncMenuBtn(); } catch(_){}
+  // Only fix select if drifted — do not reassign during onchange when already correct.
   const sel = document.getElementById('langSelect');
-  if (sel) sel.value = code;
+  if (sel && sel.value !== code) sel.value = code;
 }
 
 function applyI18n(){
   document.querySelectorAll('[data-i18n]').forEach(el => {
     const k = el.getAttribute('data-i18n');
     if (!k) return;
-    // Skip controls whose text is owned by runtime helpers (re-synced in setLang).
-    if (el.id === 'statusText' || el.id === 'clipAutoBtn' || el.id === 'menuBtn'
-        || el.id === 'quickEditBtn') return;
     if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') return;
+    if (el.children && el.children.length && el.querySelector('button, input, select, textarea')) return;
     const html = el.getAttribute('data-i18n-html') === '1';
     if (html) el.innerHTML = t(k);
     else el.textContent = t(k);
   });
   document.querySelectorAll('[data-i18n-title]').forEach(el => {
-    if (el.id === 'imeBtn') return; // applyIMEState owns title
     const k = el.getAttribute('data-i18n-title');
     if (k) el.title = t(k);
   });
@@ -349,12 +333,11 @@ function applyI18n(){
   if (ok && (typeof modalResolve === 'undefined' || !modalResolve)) {
     ok.textContent = t('confirm');
   }
+  const qeb = document.getElementById('quickEditBtn');
+  if (qeb) qeb.textContent = (typeof quickEdit !== 'undefined' && quickEdit) ? t('done') : t('edit');
   const themeBtn = document.getElementById('themeBtn');
   if (themeBtn) {
     const light = document.documentElement.classList.contains('light');
     themeBtn.title = light ? t('themeDark') : t('themeLight');
   }
-  const sel = document.getElementById('langSelect');
-  if (sel && sel.value !== lang) sel.value = lang;
 }
-
