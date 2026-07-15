@@ -5938,7 +5938,7 @@ dependencies = [
 
 [[package]]
 name = "webdock-app"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "serde",
  "serde_json",
@@ -5955,7 +5955,7 @@ dependencies = [
 
 [[package]]
 name = "webdock-core"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "base64 0.22.1",
  "directories",
@@ -5971,7 +5971,7 @@ dependencies = [
 
 [[package]]
 name = "webdock-encoder"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "base64 0.22.1",
  "core-foundation",
@@ -5983,12 +5983,13 @@ dependencies = [
 
 [[package]]
 name = "webdock-platform"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "arboard",
  "async-trait",
  "base64 0.22.1",
  "core-foundation",
+ "core-foundation-sys",
  "core-graphics 0.24.0",
  "dispatch2",
  "enigo",
@@ -6011,7 +6012,7 @@ dependencies = [
 
 [[package]]
 name = "webdock-protocol"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "serde",
  "serde_json",
@@ -6020,7 +6021,7 @@ dependencies = [
 
 [[package]]
 name = "webdock-server"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "arboard",
  "axum",

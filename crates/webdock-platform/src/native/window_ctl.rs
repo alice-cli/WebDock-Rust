@@ -1,7 +1,5 @@
 //! Raise / close / bounds for target windows.
 
-#[cfg(target_os = "macos")]
-use tracing::info;
 use tracing::{debug, warn};
 
 use super::capture::{bounds_for_route, find_window, pid_for_route};
@@ -81,32 +79,36 @@ impl WindowControl for NativeWindowControl {
         if pid <= 0 {
             return Err(WindowError::NotFound);
         }
-        let title = window_id_from_route(w.id)
-            .and_then(find_window)
-            .and_then(|win| win.title().ok())
+        let cg_wid = window_id_from_route(w.id).unwrap_or(0);
+        let title = w
+            .title
+            .clone()
+            .or_else(|| {
+                window_id_from_route(w.id)
+                    .and_then(find_window)
+                    .and_then(|win| win.title().ok())
+            })
             .unwrap_or_default();
 
         #[cfg(target_os = "macos")]
         {
-            // 1) Accessibility close button (single window, keeps multi-window apps alive)
-            if close_via_ax(pid, &title) {
-                info!(pid, %title, "window closed via Accessibility");
-                return Ok(());
-            }
-            // 2) Raise + Cmd+W
-            raise_pid(pid)?;
-            std::thread::sleep(std::time::Duration::from_millis(40));
-            if close_via_cmd_w() {
-                info!(pid, %title, "window closed via Cmd+W");
+            // WebDock path: AX close button by CGWindowID, else Cmd+W.
+            // Never terminate the whole app (multi-window Terminal-safe).
+            if super::ax_close::close_window(
+                pid,
+                cg_wid,
+                Some(title.as_str()).filter(|s| !s.is_empty()),
+            ) {
                 return Ok(());
             }
             return Err(WindowError::Other(
-                "close failed — grant Accessibility to WebRust".into(),
+                "close failed — grant Accessibility to WebRust in System Settings".into(),
             ));
         }
 
         #[cfg(not(target_os = "macos"))]
         {
+            let _ = (cg_wid, title);
             self.raise(w)?;
             close_frontmost()
         }
@@ -191,98 +193,6 @@ fn raise_linux(wid: Option<u32>, pid: i32) -> Result<(), WindowError> {
     );
     // Soft-fail like before: input still lands if the window is already up.
     Ok(())
-}
-
-/// Close the matching window via AX close button (System Events).
-#[cfg(target_os = "macos")]
-fn close_via_ax(pid: i32, title: &str) -> bool {
-    let title_esc = title.replace('\\', "\\\\").replace('"', "\\\"");
-    // Prefer window whose name matches title; else first window of the process.
-    let script = if title.is_empty() {
-        format!(
-            r#"tell application "System Events"
-  set procs to every process whose unix id is {pid}
-  if (count of procs) is 0 then return false
-  tell first item of procs
-    try
-      set frontmost to true
-      delay 0.05
-      if (count of windows) is 0 then return false
-      try
-        click (first button of window 1 whose subrole is "AXCloseButton")
-        return true
-      end try
-      try
-        perform action "AXPress" of (first button of window 1 whose description is "close button")
-        return true
-      end try
-      -- last resort: button 1 is often the close button on standard windows
-      click button 1 of window 1
-      return true
-    end try
-  end tell
-  return false
-end tell"#
-        )
-    } else {
-        format!(
-            r#"tell application "System Events"
-  set procs to every process whose unix id is {pid}
-  if (count of procs) is 0 then return false
-  tell first item of procs
-    try
-      set frontmost to true
-      delay 0.05
-      set wlist to every window
-      repeat with win in wlist
-        try
-          if name of win is "{title_esc}" or name of win contains "{title_esc}" then
-            try
-              click (first button of win whose subrole is "AXCloseButton")
-              return true
-            end try
-            try
-              click button 1 of win
-              return true
-            end try
-          end if
-        end try
-      end repeat
-      if (count of windows) > 0 then
-        try
-          click (first button of window 1 whose subrole is "AXCloseButton")
-          return true
-        end try
-        click button 1 of window 1
-        return true
-      end if
-    end try
-  end tell
-  return false
-end tell"#
-        )
-    };
-    let output = std::process::Command::new("osascript")
-        .args(["-e", &script])
-        .output();
-    match output {
-        Ok(o) => {
-            let s = String::from_utf8_lossy(&o.stdout);
-            o.status.success() && s.contains("true")
-        }
-        Err(_) => false,
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn close_via_cmd_w() -> bool {
-    let status = std::process::Command::new("osascript")
-        .args([
-            "-e",
-            r#"tell application "System Events" to keystroke "w" using command down"#,
-        ])
-        .status();
-    matches!(status, Ok(s) if s.success())
 }
 
 #[cfg(target_os = "macos")]

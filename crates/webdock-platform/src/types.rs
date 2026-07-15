@@ -118,6 +118,18 @@ pub struct KeyEvent {
 pub struct WindowRef {
     pub id: RouteId,
     pub pid: i32,
+    /// Optional window title (helps AX matching when CGWindowID lookup fails).
+    pub title: Option<String>,
+}
+
+impl WindowRef {
+    pub fn new(id: RouteId, pid: i32) -> Self {
+        Self {
+            id,
+            pid,
+            title: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
