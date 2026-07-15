@@ -69,6 +69,33 @@ pub fn content_type_for(path: &str) -> &'static str {
     }
 }
 
+/// HTML/JS/CSS must revalidate — stale i18n.js caused language-switch bugs after updates.
+fn cache_control_for(rel: &str) -> &'static str {
+    match Path::new(rel)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "html" | "js" | "css" => "no-cache",
+        _ => "public, max-age=86400",
+    }
+}
+
+/// Inject build version into index.html so script/link URLs bust browser caches.
+fn inject_webui_version(bytes: Vec<u8>, rel: &str) -> Vec<u8> {
+    if rel != "index.html" {
+        return bytes;
+    }
+    match String::from_utf8(bytes) {
+        Ok(s) => s
+            .replace("__WEBRUST_VER__", env!("CARGO_PKG_VERSION"))
+            .into_bytes(),
+        Err(e) => e.into_bytes(),
+    }
+}
+
 fn normalize_path(uri_path: &str) -> String {
     let p = uri_path.split('?').next().unwrap_or(uri_path);
     if p.is_empty() || p == "/" {
@@ -174,11 +201,12 @@ pub async fn serve_static(
         if is_index {
             if let Some(t) = token {
                 if let Some((bytes, ct)) = load_file(state.webui_dir(), &rel) {
+                    let bytes = inject_webui_version(bytes, &rel);
                     let mut res = (
                         StatusCode::OK,
                         [
                             (header::CONTENT_TYPE, ct),
-                            (header::CACHE_CONTROL, "no-store"),
+                            (header::CACHE_CONTROL, "no-cache"),
                         ],
                         bytes,
                     )
@@ -195,7 +223,14 @@ pub async fn serve_static(
     match load_file(state.webui_dir(), &rel) {
         Some((bytes, ct)) => {
             debug!(%rel, "static ok");
-            (StatusCode::OK, [(header::CONTENT_TYPE, ct)], bytes).into_response()
+            let bytes = inject_webui_version(bytes, &rel);
+            let cache = cache_control_for(&rel);
+            (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, ct), (header::CACHE_CONTROL, cache)],
+                bytes,
+            )
+                .into_response()
         }
         None => (StatusCode::NOT_FOUND, "not found").into_response(),
     }

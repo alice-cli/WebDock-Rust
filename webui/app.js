@@ -2143,12 +2143,16 @@ window.addEventListener('mouseup', () => { rz = false; });
 renderQuick();
 updateBadges();
 syncClipAutoBtn();
-// Language UI (WebDock parity: one applyI18n + select.value = lang)
+// Language UI (WebDock parity)
 try {
   const sel = document.getElementById('langSelect');
   if (sel) sel.value = lang;
   applyI18n();
   if (typeof syncMenuBtn === 'function') syncMenuBtn();
   if (typeof syncClipAutoBtn === 'function') syncClipAutoBtn();
+  // Seed status line in the active language (no data-i18n — avoids clobber on switch).
+  if (statusEl && (!statusEl.textContent || statusEl.textContent === 'Connecting…')) {
+    statusEl.textContent = t('connecting');
+  }
 } catch (_) {}
 connect();
