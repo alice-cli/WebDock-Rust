@@ -8,7 +8,7 @@ use tracing::{info, warn};
 use webdock_core::AppConfig;
 use webdock_platform;
 
-use crate::updater::UpdateInfo;
+use crate::updater::{self, UpdateInfo, UpdateProgress};
 use crate::{lan_addresses, start, ServerHandle, ServerOptions};
 
 /// Owns config and the running remote-desktop server.
@@ -18,6 +18,9 @@ pub struct Host {
     handle: Mutex<Option<ServerHandle>>,
     webui_dir: Option<PathBuf>,
     update: Mutex<Option<UpdateInfo>>,
+    update_progress: Mutex<UpdateProgress>,
+    /// Set when install asked us to exit after kicking installer.
+    pending_exit: Mutex<bool>,
 }
 
 impl Host {
@@ -34,6 +37,8 @@ impl Host {
             handle: Mutex::new(None),
             webui_dir,
             update: Mutex::new(None),
+            update_progress: Mutex::new(UpdateProgress::idle()),
+            pending_exit: Mutex::new(false),
         })
     }
 
@@ -43,6 +48,72 @@ impl Host {
 
     pub fn update_info(&self) -> Option<UpdateInfo> {
         self.update.lock().clone()
+    }
+
+    pub fn update_progress(&self) -> UpdateProgress {
+        self.update_progress.lock().clone()
+    }
+
+    pub fn set_update_progress(&self, p: UpdateProgress) {
+        *self.update_progress.lock() = p;
+    }
+
+    pub fn take_pending_exit(&self) -> bool {
+        let mut g = self.pending_exit.lock();
+        let v = *g;
+        *g = false;
+        v
+    }
+
+    /// Download + install latest (or cached) update. May set pending_exit.
+    pub fn install_update(&self) -> Result<String, String> {
+        let info = match self.update_info() {
+            Some(i) if i.update_available && i.download_url.is_some() => i,
+            _ => {
+                self.set_update_progress(UpdateProgress {
+                    phase: "checking".into(),
+                    percent: 0,
+                    message: "Checking for updates…".into(),
+                    downloaded: 0,
+                    total: 0,
+                });
+                let i = updater::check_for_update()?;
+                self.set_update_info(Some(i.clone()));
+                if !i.update_available {
+                    self.set_update_progress(UpdateProgress::idle());
+                    return Ok(format!("Up to date (v{})", i.current_version));
+                }
+                if i.download_url.is_none() {
+                    self.set_update_progress(UpdateProgress::idle());
+                    return Err("No installable asset for this platform".into());
+                }
+                i
+            }
+        };
+
+        // Stop embedded server so installers can replace the binary.
+        self.stop();
+
+        match updater::apply_update(&info, |p| {
+            self.set_update_progress(p);
+        }) {
+            Ok(outcome) => {
+                if outcome.should_exit {
+                    *self.pending_exit.lock() = true;
+                }
+                Ok(outcome.message)
+            }
+            Err(e) => {
+                self.set_update_progress(UpdateProgress {
+                    phase: "error".into(),
+                    percent: 0,
+                    message: e.clone(),
+                    downloaded: 0,
+                    total: 0,
+                });
+                Err(e)
+            }
+        }
     }
 
     pub fn config(&self) -> AppConfig {
@@ -74,6 +145,7 @@ impl Host {
             Vec::new()
         };
         let update = self.update.lock().clone();
+        let update_progress = self.update_progress.lock().clone();
         serde_json::json!({
             "running": running,
             "port": port,
@@ -89,6 +161,7 @@ impl Host {
             "configPath": AppConfig::config_path().display().to_string(),
             "version": env!("CARGO_PKG_VERSION"),
             "update": update,
+            "updateProgress": update_progress,
         })
     }
 

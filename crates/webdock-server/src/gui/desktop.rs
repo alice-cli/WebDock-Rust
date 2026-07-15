@@ -226,14 +226,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             host_loop.set_update_info(Some(info.clone()));
                             if info.update_available {
                                 push(Some(format!(
-                                    "Update available: v{} → v{}",
+                                    "Update available: v{} → v{}. Use Settings → Install update.",
                                     info.current_version, info.latest_version
                                 )));
-                                if let Some(url) =
-                                    info.html_url.as_ref().or(info.download_url.as_ref())
-                                {
-                                    crate::util::open_url(url);
-                                }
                             } else {
                                 push(Some(format!("Up to date (v{})", info.current_version)));
                             }
@@ -247,6 +242,16 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             Event::UserEvent(UserEvent::Ipc(body)) => {
                 handle_ipc(&host_loop, &body, &push);
                 refresh_tray(tray.as_ref(), host_loop.is_running());
+                if host_loop.take_pending_exit() {
+                    host_loop.stop();
+                    tray.take();
+                    *control_flow = ControlFlow::Exit;
+                    // Give installer/relaunch scripts a moment, then exit.
+                    std::thread::spawn(|| {
+                        std::thread::sleep(std::time::Duration::from_millis(400));
+                        std::process::exit(0);
+                    });
+                }
             }
             Event::UserEvent(UserEvent::Quit) => {
                 host_loop.stop();
@@ -316,14 +321,18 @@ fn handle_ipc(host: &SharedHost, body: &str, push: &impl Fn(Option<String>)) {
                 host.set_update_info(Some(info.clone()));
                 if info.update_available {
                     push(Some(format!(
-                        "Update available: v{} → open release page",
-                        info.latest_version
+                        "Update available: v{} → v{} (use Install update)",
+                        info.current_version, info.latest_version
                     )));
                 } else {
                     push(Some(format!("Up to date (v{})", info.current_version)));
                 }
             }
             Err(e) => push(Some(format!("Update check failed: {e}"))),
+        },
+        "installUpdate" => match host.install_update() {
+            Ok(msg) => push(Some(msg)),
+            Err(e) => push(Some(format!("Install failed: {e}"))),
         },
         "openUpdate" => {
             if let Some(info) = host.update_info() {
@@ -333,7 +342,6 @@ fn handle_ipc(host: &SharedHost, body: &str, push: &impl Fn(Option<String>)) {
                     return;
                 }
             }
-            // Fresh check
             match updater::check_for_update() {
                 Ok(info) => {
                     host.set_update_info(Some(info.clone()));

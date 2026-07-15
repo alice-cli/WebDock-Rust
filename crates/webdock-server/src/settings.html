@@ -109,10 +109,17 @@
         <span class="badge" id="verBadge">—</span>
         <span id="updBadge" class="badge ok" style="display:none">Up to date</span>
       </div>
-      <p class="hint" id="updHint">Checks GitHub Releases (alice-cli/WebDock-Rust).</p>
+      <p class="hint" id="updHint">GitHub Releases — install in-app (no manual download needed).</p>
+      <div class="row" id="updProgressRow" style="display:none">
+        <div style="flex:1;background:#0a0b0d;border:1px solid var(--line);border-radius:8px;height:10px;overflow:hidden">
+          <div id="updProgressBar" style="height:100%;width:0%;background:var(--blue);transition:width .15s"></div>
+        </div>
+        <span class="hint" id="updProgressLabel" style="min-width:4em">0%</span>
+      </div>
       <div class="btns">
         <button type="button" id="btnCheckUpd">Check for updates</button>
-        <button type="button" class="primary" id="btnOpenUpd" style="display:none">Download update</button>
+        <button type="button" class="primary" id="btnInstallUpd" style="display:none">Install update</button>
+        <button type="button" id="btnOpenUpd" style="display:none">Open release page</button>
       </div>
     </section>
 
@@ -220,18 +227,39 @@
       const upd = s.update;
       const badge = $('updBadge');
       const btnOpen = $('btnOpenUpd');
+      const btnInstall = $('btnInstallUpd');
       if (upd && upd.updateAvailable) {
         badge.style.display = '';
         badge.className = 'badge warn';
         badge.textContent = 'v' + upd.latestVersion + ' available';
         btnOpen.style.display = '';
+        btnInstall.style.display = '';
         $('updHint').textContent = (upd.assetName ? ('Asset: ' + upd.assetName + ' · ') : '')
-          + 'GitHub Releases auto-check';
+          + 'Install in-app from GitHub Releases';
       } else if (upd) {
         badge.style.display = '';
         badge.className = 'badge ok';
         badge.textContent = 'Up to date';
         btnOpen.style.display = 'none';
+        btnInstall.style.display = 'none';
+      }
+      // Progress bar for in-app install
+      const prog = s.updateProgress;
+      const row = $('updProgressRow');
+      if (prog && prog.phase && prog.phase !== 'idle') {
+        row.style.display = '';
+        const pct = prog.percent || 0;
+        $('updProgressBar').style.width = pct + '%';
+        $('updProgressLabel').textContent = prog.phase === 'error' ? '!' : (pct + '%');
+        if (prog.message) $('updHint').textContent = prog.message;
+        if (prog.phase === 'downloading' || prog.phase === 'installing') {
+          btnInstall.disabled = true;
+        } else {
+          btnInstall.disabled = false;
+        }
+      } else if (!prog || prog.phase === 'idle') {
+        if (!upd || !upd.updateAvailable) row.style.display = 'none';
+        btnInstall.disabled = false;
       }
     }
 
@@ -258,6 +286,12 @@
     $('btnOpen').onclick = () => send('openRemote');
     $('btnQuit').onclick = () => send('quit');
     $('btnCheckUpd').onclick = () => send('checkUpdate');
+    $('btnInstallUpd').onclick = () => {
+      $('updProgressRow').style.display = '';
+      $('updHint').textContent = 'Starting update…';
+      $('btnInstallUpd').disabled = true;
+      send('installUpdate');
+    };
     $('btnOpenUpd').onclick = () => send('openUpdate');
     $('serverEnabled').onchange = () => applySettings();
 
