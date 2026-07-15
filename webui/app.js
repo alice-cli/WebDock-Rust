@@ -2143,10 +2143,20 @@ window.addEventListener('mouseup', () => { rz = false; });
 renderQuick();
 updateBadges();
 syncClipAutoBtn();
-// Language UI
+// Language UI — restore stored choice (never re-detect navigator over user pick).
 try {
-  const sel = document.getElementById('langSelect');
-  if (sel) sel.value = lang;
-  applyI18n();
+  if (typeof bindLangSelect === 'function') bindLangSelect();
+  if (typeof readStoredLang === 'function') {
+    const stored = readStoredLang();
+    if (stored && stored !== lang) setLang(stored);
+    else {
+      applyI18n();
+      if (typeof syncLangSelect === 'function') syncLangSelect();
+      if (typeof syncMenuBtn === 'function') syncMenuBtn();
+      if (typeof syncClipAutoBtn === 'function') syncClipAutoBtn();
+    }
+  } else {
+    applyI18n();
+  }
 } catch (_) {}
 connect();
