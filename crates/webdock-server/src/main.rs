@@ -41,6 +41,7 @@ fn main() {
              Other:\n\
                WebRust --gen-token\n\
                WebRust --check-update\n\
+               WebRust --install-update\n\
                WebRust --version",
             env!("CARGO_PKG_VERSION")
         );
@@ -62,6 +63,7 @@ fn main() {
                     if let Some(n) = &info.asset_name {
                         println!("asset:   {n}");
                     }
+                    println!("kind:    {:?}", info.install_kind);
                     if let Some(u) = &info.download_url {
                         println!("download:{u}");
                     }
@@ -72,6 +74,41 @@ fn main() {
                 } else {
                     println!("update:  up to date");
                     std::process::exit(0);
+                }
+            }
+            Err(e) => {
+                eprintln!("check-update failed: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    if args.iter().any(|a| a == "--install-update") {
+        match webdock_server::updater::check_for_update() {
+            Ok(info) if !info.update_available => {
+                println!("already up to date (v{})", info.current_version);
+                std::process::exit(0);
+            }
+            Ok(info) => {
+                println!(
+                    "installing v{} ({})…",
+                    info.latest_version,
+                    info.asset_name.as_deref().unwrap_or("?")
+                );
+                match webdock_server::updater::apply_update(&info, |p| {
+                    eprintln!("[{}] {}%", p.phase, p.percent);
+                }) {
+                    Ok(out) => {
+                        println!("{}", out.message);
+                        if out.should_exit {
+                            std::process::exit(0);
+                        }
+                        std::process::exit(0);
+                    }
+                    Err(e) => {
+                        eprintln!("install-update failed: {e}");
+                        std::process::exit(1);
+                    }
                 }
             }
             Err(e) => {
